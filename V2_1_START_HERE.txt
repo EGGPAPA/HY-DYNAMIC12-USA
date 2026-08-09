@@ -1,0 +1,13 @@
+HY DYNAMIC12 USA V2.1 MOBILE
+
+1. 기존 .env 파일을 이 폴더에 복사
+2. 새 PC/새 폴더라면 install_mobile.bat 최초 1회 실행
+3. run_mobile.bat 더블클릭
+4. 표시되는 http://192.168.x.x:8501 주소를 iPhone Safari에 입력
+5. PC와 iPhone은 같은 Wi-Fi에 연결
+
+이번 수정:
+- Windows BAT 'exist' 오류 수정
+- BAT 파일을 ASCII + CRLF로 저장
+- run_mobile.bat 구문 단순화
+- LAN IP 표시 방식 안정화

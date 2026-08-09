@@ -1,0 +1,19 @@
+HY DYNAMIC12 USA V2.0 MOBILE - iPhone 접속
+
+1) PC와 iPhone을 같은 Wi-Fi에 연결
+2) install.bat 최초 1회 실행
+3) 기존 .env를 이 폴더로 복사
+4) run_mobile.bat 실행
+5) 검은 창에 표시되는 예:
+   http://192.168.0.10:8501
+6) iPhone Safari에서 위 주소 입력
+
+접속이 안 될 때:
+- Windows 방화벽에서 Python/Streamlit의 개인 네트워크 접속 허용
+- PC와 iPhone이 같은 공유기/Wi-Fi인지 확인
+- VPN이 켜져 있으면 잠시 끄고 확인
+
+보안:
+- 같은 Wi-Fi 내부 접속용입니다.
+- KIS App Key/Secret은 PC의 .env에만 보관하세요.
+- 공유기 포트포워딩으로 인터넷에 직접 공개하지 마세요.
