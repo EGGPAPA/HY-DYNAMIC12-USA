@@ -3,8 +3,12 @@
     "ticker": "NU",
     "name": "누 홀딩스",
     "mode": "candidate",
-    "entry1": 16.00,
+    "entry1": 14.23,
     "entry2": 13.77,
+    "average_price": null,
+    "take_profit1_pct": 5,
+    "take_profit2_pct": 10,
+    "stop_loss_pct": null,
     "enabled": true
   }
 ]
