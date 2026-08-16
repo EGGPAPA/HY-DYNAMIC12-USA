@@ -10,12 +10,20 @@ from fundamental_us import score_yf
 
 from pathlib import Path
 import json
+import os
+import requests
 import html
 
 STATE_DIR=Path("data")
 STATE_DIR.mkdir(exist_ok=True)
 TOP12_FILE=STATE_DIR/"usa_top12.json"
 CAND_FILE=STATE_DIR/"usa_candidates.json"
+
+KAKAO_STATE_FILE=STATE_DIR/"kakao_monitor_state.json"
+KAKAO_WATCH_FILE=Path("kakao_watchlist.json")
+KAKAO_REST_API_KEY=os.getenv("KAKAO_REST_API_KEY","").strip()
+KAKAO_CLIENT_SECRET=os.getenv("KAKAO_CLIENT_SECRET","").strip()
+KAKAO_REFRESH_TOKEN=os.getenv("KAKAO_REFRESH_TOKEN","").strip()
 
 def save_json(path,obj):
     try:
@@ -30,6 +38,129 @@ def load_json(path,default):
     except Exception:
         pass
     return default
+
+
+
+def _kakao_load_state():
+    try:
+        if KAKAO_STATE_FILE.exists():
+            return json.loads(KAKAO_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+def _kakao_save_state(obj):
+    try:
+        KAKAO_STATE_FILE.write_text(
+            json.dumps(obj,ensure_ascii=False,indent=2,default=str),
+            encoding="utf-8"
+        )
+    except Exception:
+        pass
+
+def _kakao_get_access_token():
+    if not KAKAO_REST_API_KEY or not KAKAO_REFRESH_TOKEN:
+        raise RuntimeError("Kakao Secrets 미설정: KAKAO_REST_API_KEY / KAKAO_REFRESH_TOKEN")
+
+    data={
+        "grant_type":"refresh_token",
+        "client_id":KAKAO_REST_API_KEY,
+        "refresh_token":KAKAO_REFRESH_TOKEN,
+    }
+    if KAKAO_CLIENT_SECRET:
+        data["client_secret"]=KAKAO_CLIENT_SECRET
+
+    r=requests.post(
+        "https://kauth.kakao.com/oauth/token",
+        data=data,
+        timeout=20,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"Kakao token error {r.status_code}: {r.text[:300]}")
+    return r.json().get("access_token")
+
+def kakao_send_to_me(text):
+    token=_kakao_get_access_token()
+    template={
+        "object_type":"text",
+        "text":text,
+        "link":{
+            "web_url":"https://github.com/EGGPAPA/HY-DYNAMIC12-USA",
+            "mobile_web_url":"https://github.com/EGGPAPA/HY-DYNAMIC12-USA",
+        },
+        "button_title":"HY DYNAMIC12 USA",
+    }
+    r=requests.post(
+        "https://kapi.kakao.com/v2/api/talk/memo/default/send",
+        headers={"Authorization":f"Bearer {token}"},
+        data={"template_object":json.dumps(template,ensure_ascii=False)},
+        timeout=20,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"Kakao send error {r.status_code}: {r.text[:300]}")
+    return True
+
+def save_kakao_watchlist(top):
+    """
+    TOP12 중 적극매수만 Kakao watchlist에 저장.
+    GitHub Actions의 기존 kakao_monitor.py와 호환되도록
+    ticker/name/entry1/entry2/stop/score 필드를 저장합니다.
+    """
+    active=[]
+    for r in top[:12]:
+        if str(r.get("판정","")).startswith("적극매수"):
+            active.append({
+                "ticker":r.get("티커",""),
+                "name":r.get("종목",""),
+                "score":r.get("판정점수",r.get("USA점수")),
+                "entry1":r.get("1차매수가($)"),
+                "entry2":r.get("2차매수가($)"),
+                "stop":r.get("3%손절가($)"),
+                "judgment":r.get("판정",""),
+            })
+    try:
+        KAKAO_WATCH_FILE.write_text(
+            json.dumps(active,ensure_ascii=False,indent=2,default=str),
+            encoding="utf-8"
+        )
+    except Exception:
+        pass
+    return active
+
+def maybe_send_new_active_buy(top):
+    """
+    새로 적극매수에 진입한 종목만 1회 Kakao 전송.
+    기존 상태와 비교해 중복 알림을 방지합니다.
+    """
+    active=save_kakao_watchlist(top)
+    current={x["ticker"]:x for x in active if x.get("ticker")}
+    state=_kakao_load_state()
+    prev=set(state.get("active_tickers",[]))
+    now=set(current.keys())
+    newly=sorted(now-prev)
+
+    sent=[]
+    for ticker in newly:
+        r=current[ticker]
+        msg=(
+            f"🟢 HY DYNAMIC12 USA 적극매수\n"
+            f"{r.get('name','')} ({ticker})\n"
+            f"판정점수: {r.get('score','-')}\n"
+            f"1차 매수가: ${r.get('entry1','-')}\n"
+            f"2차 매수가: ${r.get('entry2','-')}\n"
+            f"3% 손절가: ${r.get('stop','-')}"
+        )
+        try:
+            kakao_send_to_me(msg)
+            sent.append(ticker)
+        except Exception:
+            pass
+
+    _kakao_save_state({
+        "active_tickers":sorted(now),
+        "last_sent":sent,
+    })
+    return active, sent
 
 
 def usa_exit_plan(entry, current):
@@ -173,7 +304,7 @@ div[data-testid="stDataFrame"] {font-size: 0.88rem;}
 }
 </style>
 """, unsafe_allow_html=True)
-st.title("HY DYNAMIC12 USA V2.2 · AUTO JUDGMENT")
+st.title("HY DYNAMIC12 USA V2.3 · BLINK + KAKAO")
 st.caption("NASDAQ · NYSE · AMEX → 거래대금/시총/거래증가/신고가 → 주도주 정밀분석 → 오늘의 USA TOP12")
 s=settings()
 
@@ -258,7 +389,7 @@ def render_usa_top12_blink(top):
     )
 
 
-tabs=st.tabs(["오늘 TOP12","미국시장 스캔","상세","자금관리","KIS 설정","전략 규칙"])
+tabs=st.tabs(["오늘 TOP12","미국시장 스캔","상세","자금관리","KIS 설정","🔔 카카오","전략 규칙"])
 
 with tabs[4]:
     st.subheader("KIS 설정")
@@ -346,7 +477,7 @@ with tabs[1]:
             for n,r in enumerate(rows,1):r["순위"]=n
             valid_rows=[x for x in rows if isinstance(x.get("USA점수"),(int,float))]
             st.session_state["us_ranked"]=valid_rows; st.session_state["us_details"]=details
-            save_json(TOP12_FILE,valid_rows[:12])
+            save_json(TOP12_FILE,valid_rows[:12]); save_kakao_watchlist(valid_rows[:12])
             bar.empty();msg.success(f"USA TOP12 생성 완료 · 정상분석 {len(valid_rows)}개")
 
 with tabs[0]:
@@ -446,7 +577,7 @@ with tabs[0]:
                     valid=[x for x in result if isinstance(x.get("USA점수"),(int,float))]
                     st.session_state["us_ranked"]=valid
                     st.session_state["us_details"]=details
-                    save_json(TOP12_FILE,valid[:12])
+                    save_json(TOP12_FILE,valid[:12]); save_kakao_watchlist(valid[:12])
 
                     bar.empty()
                     if valid:
@@ -467,6 +598,12 @@ with tabs[0]:
                     st.error("USA TOP12 자동 생성 실패")
                     st.exception(e)
     else:
+        # TOP12가 표시될 때 적극매수 watchlist를 최신화하고,
+        # 새 적극매수 진입 종목만 Kakao 1회 알림 시도
+        try:
+            _kakao_active,_kakao_sent=maybe_send_new_active_buy(top)
+        except Exception:
+            _kakao_active=[]; _kakao_sent=[]
         buys=[r for r in top if str(r["판정"]).startswith(("적극매수","매수후보"))]
         a,b,c,d=st.columns(4)
         a.metric("오늘 1위",top[0]["티커"]); b.metric("USA점수",top[0]["USA점수"])
@@ -573,7 +710,43 @@ with tabs[3]:
     st.write("손절은 **최종 평균매수가 대비 -3%**를 기본 실행 기준으로 사용합니다. ATR은 분석용 변동성 지표로만 유지합니다.")
     st.caption("환율·환전수수료·매매수수료·세금은 실제 증권사 조건에 맞춰 별도로 확인하세요.")
 
+
 with tabs[5]:
+    st.subheader("🔔 카카오 연결")
+    _rows=st.session_state.get("us_ranked",[])
+    if not _rows:
+        _rows=load_json(TOP12_FILE,[])
+    _top=[r for r in _rows if isinstance(r.get("USA점수"),(int,float))][:12]
+
+    c1,c2,c3=st.columns(3)
+    c1.metric("REST API KEY","설정됨" if KAKAO_REST_API_KEY else "미설정")
+    c2.metric("REFRESH TOKEN","설정됨" if KAKAO_REFRESH_TOKEN else "미설정")
+    c3.metric("CLIENT SECRET","설정됨" if KAKAO_CLIENT_SECRET else "선택")
+
+    st.caption(
+        "Streamlit Secrets 또는 GitHub Actions Secrets에 "
+        "KAKAO_REST_API_KEY / KAKAO_REFRESH_TOKEN / 필요 시 KAKAO_CLIENT_SECRET을 등록합니다."
+    )
+
+    if _top:
+        _active=save_kakao_watchlist(_top)
+        st.write(f"현재 TOP12 적극매수 watchlist: **{len(_active)}종목**")
+        if _active:
+            st.dataframe(pd.DataFrame(_active),use_container_width=True,hide_index=True)
+        else:
+            st.info("현재 적극매수 종목이 없어 카카오 매수 알림 대상이 없습니다.")
+    else:
+        st.info("TOP12 생성 후 카카오 watchlist가 만들어집니다.")
+
+    if st.button("📨 카카오 테스트 메시지 보내기",use_container_width=True):
+        try:
+            kakao_send_to_me("✅ HY DYNAMIC12 USA 카카오 연결 테스트 성공")
+            st.success("카카오 테스트 메시지를 전송했습니다.")
+        except Exception as e:
+            st.error(str(e))
+
+
+with tabs[6]:
     st.markdown("""
 
 
@@ -612,7 +785,7 @@ with tabs[5]:
 - KIS 조회가 일시 실패하거나 데이터가 부족하면 **yfinance를 보조 데이터원으로 자동 전환**합니다.
 - 정상 분석된 종목만 저장하며 화면에는 상위 12개만 TOP12로 표시합니다.
 
-### HY DYNAMIC12 USA V2.2 BLINK 구조
+### HY DYNAMIC12 USA V2.3 BLINK + KAKAO 구조
 - 대상: **NASDAQ + NYSE + AMEX**
 - 1차 후보: **거래대금 + 시가총액 + 거래증가 + 신고가**
 - 정밀분석: **20/50/200일 추세 + 20/60일 모멘텀 + 거래대금 + ATR + 과이격**
@@ -620,7 +793,8 @@ with tabs[5]:
 - 최종점수: **주도주 35% + 기술 25% + 시장수급 15% + 거래대금 10% + 재무 15% = 100점**
 - TOP12는 매수 12종목이 아닙니다. **실제 운용은 최대 6종목**입니다.
 - 한 종목은 **1차 50% + 2차 50%** 분할진입입니다.
-- **V2.2:** 적극매수 종목만 초록 점과 종목명이 부드럽게 점멸합니다. 매수후보·관찰·현금대기는 정적으로 표시합니다.
+- **V2.3:** 적극매수 종목만 초록 점과 종목명이 부드럽게 점멸합니다.
+- **Kakao:** 적극매수 종목만 watchlist에 저장하고, 새 적극매수 진입 종목은 중복 없이 카카오 알림을 시도합니다.
 - 자동주문 기능은 없습니다.
 
 ### 자동 판정 기준
