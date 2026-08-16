@@ -2,8 +2,9 @@ import os
 import json
 import requests
 import yfinance as yf
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 WATCHLIST_FILE = Path("kakao_watchlist.json")
 STATE_DIR = Path("data")
@@ -16,26 +17,54 @@ KAKAO_REFRESH_TOKEN = os.environ.get("KAKAO_REFRESH_TOKEN", "").strip()
 TOKEN_URL = "https://kauth.kakao.com/oauth/token"
 MEMO_URL = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
 
+NEW_YORK = ZoneInfo("America/New_York")
+MARKET_OPEN = time(9, 30)
+MARKET_CLOSE = time(16, 0)
+
+
+def ny_now():
+    return datetime.now(timezone.utc).astimezone(NEW_YORK)
+
+
+def is_us_regular_market_time():
+    """
+    뉴욕 현지시간 기준 월~금 09:30~16:00에만 True.
+    America/New_York를 사용하므로 EDT/EST 서머타임 전환은 자동 처리됩니다.
+    미국 증시 휴장일 자체는 여기서 별도 판별하지 않습니다.
+    """
+    now = ny_now()
+
+    if now.weekday() >= 5:
+        return False
+
+    local_time = now.time().replace(tzinfo=None)
+    return MARKET_OPEN <= local_time <= MARKET_CLOSE
+
 
 def load_json(path, default):
     if not path.exists():
         return default
+
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def save_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
+
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def validate_secrets():
     missing = []
+
     if not KAKAO_REST_API_KEY:
         missing.append("KAKAO_REST_API_KEY")
+
     if not KAKAO_REFRESH_TOKEN:
         missing.append("KAKAO_REFRESH_TOKEN")
+
     if missing:
         raise RuntimeError(
             "GitHub Repository Secrets 누락: " + ", ".join(missing)
@@ -65,7 +94,9 @@ def get_access_token():
     access_token = result.get("access_token")
 
     if not access_token:
-        raise RuntimeError(f"카카오 access_token 없음: {result}")
+        raise RuntimeError(
+            f"카카오 access_token 없음: {result}"
+        )
 
     if result.get("refresh_token"):
         print(
@@ -92,7 +123,10 @@ def send_kakao(access_token, text):
         "button_title": "HY DYNAMIC12 열기",
     }
 
-    headers = {"Authorization": f"Bearer {access_token}"}
+    headers = {
+        "Authorization": f"Bearer {access_token}"
+    }
+
     data = {
         "template_object": json.dumps(
             template,
@@ -141,6 +175,7 @@ def get_price(ticker):
 def ensure_access_token(current_token):
     if current_token:
         return current_token
+
     return get_access_token()
 
 
@@ -151,8 +186,14 @@ def fire_alert(
     message,
 ):
     access_token = ensure_access_token(access_token)
-    send_kakao(access_token, message)
+
+    send_kakao(
+        access_token,
+        message,
+    )
+
     state[state_key] = True
+
     return access_token, True
 
 
@@ -173,14 +214,17 @@ def check_entry_level(
     state_key = f"{ticker}_{key}"
 
     print(
-        f"{ticker} {label}: 현재 ${price:.2f} / 기준 ${target:.2f}"
+        f"{ticker} {label}: "
+        f"현재 ${price:.2f} / 기준 ${target:.2f}"
     )
 
     changed = False
 
     if price <= target:
         if not state.get(state_key, False):
-            print(f"{ticker} {label} 도달 → 카카오 알림 준비")
+            print(
+                f"{ticker} {label} 도달 → 카카오 알림 준비"
+            )
 
             message = (
                 "🔔 HY DYNAMIC12 매수가 도달\n\n"
@@ -198,15 +242,23 @@ def check_entry_level(
                 message,
             )
 
-            print(f"{ticker} {label} 알림 상태 저장")
+            print(
+                f"{ticker} {label} 알림 상태 저장"
+            )
+
         else:
-            print(f"{ticker} {label}: 이미 알림 전송된 상태")
+            print(
+                f"{ticker} {label}: 이미 알림 전송된 상태"
+            )
 
     else:
         if state.get(state_key, False):
             state[state_key] = False
             changed = True
-            print(f"{ticker} {label}: 가격 회복 → 알림 재무장")
+
+            print(
+                f"{ticker} {label}: 가격 회복 → 알림 재무장"
+            )
 
     return access_token, changed
 
@@ -230,15 +282,17 @@ def check_profit_level(
     state_key = f"{ticker}_{key}"
 
     print(
-        f"{ticker} {label}: 현재 ${price:.2f} / "
-        f"목표 ${target:.2f} (+{pct:.1f}%)"
+        f"{ticker} {label}: "
+        f"현재 ${price:.2f} / 목표 ${target:.2f} (+{pct:.1f}%)"
     )
 
     changed = False
 
     if price >= target:
         if not state.get(state_key, False):
-            print(f"{ticker} {label} 도달 → 카카오 알림 준비")
+            print(
+                f"{ticker} {label} 도달 → 카카오 알림 준비"
+            )
 
             message = (
                 "🎯 HY DYNAMIC12 목표수익 도달\n\n"
@@ -258,15 +312,23 @@ def check_profit_level(
                 message,
             )
 
-            print(f"{ticker} {label} 알림 상태 저장")
+            print(
+                f"{ticker} {label} 알림 상태 저장"
+            )
+
         else:
-            print(f"{ticker} {label}: 이미 알림 전송된 상태")
+            print(
+                f"{ticker} {label}: 이미 알림 전송된 상태"
+            )
 
     else:
         if state.get(state_key, False):
             state[state_key] = False
             changed = True
-            print(f"{ticker} {label}: 목표가 아래 → 알림 재무장")
+
+            print(
+                f"{ticker} {label}: 목표가 아래 → 알림 재무장"
+            )
 
     return access_token, changed
 
@@ -288,15 +350,17 @@ def check_stop_loss(
     state_key = f"{ticker}_stop_loss"
 
     print(
-        f"{ticker} 손절 기준: 현재 ${price:.2f} / "
-        f"기준 ${target:.2f} (-{pct:.1f}%)"
+        f"{ticker} 손절 기준: "
+        f"현재 ${price:.2f} / 기준 ${target:.2f} (-{pct:.1f}%)"
     )
 
     changed = False
 
     if price <= target:
         if not state.get(state_key, False):
-            print(f"{ticker} 손절 기준 도달 → 카카오 알림 준비")
+            print(
+                f"{ticker} 손절 기준 도달 → 카카오 알림 준비"
+            )
 
             message = (
                 "⚠️ HY DYNAMIC12 손절 기준 도달\n\n"
@@ -315,29 +379,60 @@ def check_stop_loss(
                 message,
             )
 
-            print(f"{ticker} 손절 알림 상태 저장")
+            print(
+                f"{ticker} 손절 알림 상태 저장"
+            )
+
         else:
-            print(f"{ticker} 손절: 이미 알림 전송된 상태")
+            print(
+                f"{ticker} 손절: 이미 알림 전송된 상태"
+            )
 
     else:
         if state.get(state_key, False):
             state[state_key] = False
             changed = True
-            print(f"{ticker} 손절 기준 회복 → 알림 재무장")
+
+            print(
+                f"{ticker} 손절 기준 회복 → 알림 재무장"
+            )
 
     return access_token, changed
 
 
 def main():
+    now = ny_now()
+
     print("=== HY DYNAMIC12 Kakao Monitor 시작 ===")
+    print(
+        "뉴욕 현재시간:",
+        now.strftime("%Y-%m-%d %H:%M:%S %Z"),
+    )
+
+    if not is_us_regular_market_time():
+        print(
+            "미국 정규장 시간이 아닙니다. "
+            "09:30~16:00 ET에만 가격 감시를 실행합니다."
+        )
+        print("=== HY DYNAMIC12 자동감시 종료 ===")
+        return
+
+    print("미국 정규장 시간 확인 완료 → 가격 감시 시작")
 
     if not WATCHLIST_FILE.exists():
         raise FileNotFoundError(
             "kakao_watchlist.json 파일을 찾을 수 없습니다."
         )
 
-    watchlist = load_json(WATCHLIST_FILE, [])
-    state = load_json(STATE_FILE, {})
+    watchlist = load_json(
+        WATCHLIST_FILE,
+        [],
+    )
+
+    state = load_json(
+        STATE_FILE,
+        {},
+    )
 
     if not isinstance(watchlist, list):
         raise ValueError(
@@ -354,23 +449,39 @@ def main():
 
         enabled_count += 1
 
-        ticker = str(item.get("ticker", "")).strip().upper()
-        name = str(item.get("name", ticker)).strip()
-        mode = str(item.get("mode", "candidate")).strip().lower()
+        ticker = str(
+            item.get("ticker", "")
+        ).strip().upper()
+
+        name = str(
+            item.get("name", ticker)
+        ).strip()
+
+        mode = str(
+            item.get("mode", "candidate")
+        ).strip().lower()
 
         if not ticker:
-            print("ticker 없는 항목 건너뜀")
+            print(
+                "ticker 없는 항목 건너뜀"
+            )
             continue
 
         price = get_price(ticker)
 
         if price is None:
-            print(f"{ticker}: 가격 조회 실패")
+            print(
+                f"{ticker}: 가격 조회 실패"
+            )
             continue
 
         print("")
-        print(f"[{ticker}] {name} / mode={mode}")
-        print(f"{ticker}: ${price:.2f}")
+        print(
+            f"[{ticker}] {name} / mode={mode}"
+        )
+        print(
+            f"{ticker}: ${price:.2f}"
+        )
 
         if mode == "candidate":
             for key, label in [
@@ -387,10 +498,13 @@ def main():
                     state=state,
                     access_token=access_token,
                 )
+
                 changed = changed or item_changed
 
         elif mode == "holding":
-            avg_price = item.get("average_price")
+            avg_price = item.get(
+                "average_price"
+            )
 
             if avg_price in (None, ""):
                 print(
@@ -399,11 +513,21 @@ def main():
                 )
                 continue
 
-            avg_price = float(avg_price)
+            avg_price = float(
+                avg_price
+            )
 
             for key, label, pct_key in [
-                ("take_profit1", "1차 익절", "take_profit1_pct"),
-                ("take_profit2", "2차 익절", "take_profit2_pct"),
+                (
+                    "take_profit1",
+                    "1차 익절",
+                    "take_profit1_pct",
+                ),
+                (
+                    "take_profit2",
+                    "2차 익절",
+                    "take_profit2_pct",
+                ),
             ]:
                 access_token, item_changed = check_profit_level(
                     ticker=ticker,
@@ -416,6 +540,7 @@ def main():
                     state=state,
                     access_token=access_token,
                 )
+
                 changed = changed or item_changed
 
             access_token, item_changed = check_stop_loss(
@@ -427,6 +552,7 @@ def main():
                 state=state,
                 access_token=access_token,
             )
+
             changed = changed or item_changed
 
         else:
@@ -436,19 +562,32 @@ def main():
             )
 
     if enabled_count == 0:
-        print("활성화된 감시 종목이 없습니다.")
+        print(
+            "활성화된 감시 종목이 없습니다."
+        )
 
     if changed:
         state["_updated_at"] = datetime.now(
             timezone.utc
         ).isoformat()
 
-        save_json(STATE_FILE, state)
-        print(f"상태 파일 저장: {STATE_FILE}")
-    else:
-        print("상태 변경 없음")
+        save_json(
+            STATE_FILE,
+            state,
+        )
 
-    print("=== HY DYNAMIC12 자동감시 완료 ===")
+        print(
+            f"상태 파일 저장: {STATE_FILE}"
+        )
+
+    else:
+        print(
+            "상태 변경 없음"
+        )
+
+    print(
+        "=== HY DYNAMIC12 자동감시 완료 ==="
+    )
 
 
 if __name__ == "__main__":
