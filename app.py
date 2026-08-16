@@ -643,7 +643,39 @@ with tabs[6]:
                 except Exception as _e:
                     st.error(str(_e))
 
-        st.info("24시간 백그라운드 감시는 Streamlit 앱이 열려 있지 않거나 절전 상태이면 보장되지 않습니다. 현재 버전은 앱에서 가격 확인을 실행할 때 알림을 보냅니다.")
+            with st.expander("⚙️ GitHub 자동감시 설정", expanded=False):
+                st.caption("GitHub Actions가 앱이 닫혀 있어도 미국 정규장 중 가격을 확인하도록 설정할 때 사용합니다.")
+                _rt=str(_tokens.get("refresh_token","") or "")
+                if _rt:
+                    st.text_input("KAKAO_REFRESH_TOKEN", value=_rt, type="password", help="GitHub 저장소의 Settings → Secrets and variables → Actions에만 저장하세요. 채팅/코드에는 올리지 마세요.")
+                _rows_auto=st.session_state.get("us_ranked",[]) or load_json(TOP12_FILE,[])
+                _auto_candidates=[x for x in _rows_auto if str(x.get("판정","")).startswith(("적극매수","매수후보"))][:6]
+                _watch=[]
+                for _r in _auto_candidates:
+                    try:
+                        _watch.append({
+                            "ticker":str(_r.get("티커","")),
+                            "name":str(_r.get("종목","")),
+                            "mode":"candidate",
+                            "entry1":float(_r.get("1차매수가($)")),
+                            "entry2":float(_r.get("2차매수가($)")),
+                            "enabled":True,
+                        })
+                    except Exception:
+                        pass
+                if _watch:
+                    st.download_button(
+                        "⬇️ 현재 진입후보 자동감시 watchlist 다운로드",
+                        data=json.dumps(_watch,ensure_ascii=False,indent=2),
+                        file_name="kakao_watchlist.json",
+                        mime="application/json",
+                        use_container_width=True,
+                    )
+                    st.caption("TOP12를 새로 만든 날에는 이 파일을 다시 내려받아 GitHub의 data/kakao_watchlist.json과 교체하면 자동감시 대상도 갱신됩니다.")
+                else:
+                    st.info("현재 적극매수/매수후보가 없어 자동감시 watchlist를 만들 종목이 없습니다.")
+
+        st.info("24시간 백그라운드 감시는 Streamlit 단독으로 보장되지 않습니다. GitHub Actions 자동감시를 함께 설정하면 앱을 닫아도 미국 정규장 중 주기적으로 가격을 확인할 수 있습니다.")
 
 with tabs[5]:
     st.markdown("""
