@@ -10,181 +10,11 @@ from fundamental_us import score_yf
 
 from pathlib import Path
 import json
-import os
-import secrets
-import requests
-from urllib.parse import urlencode
-from datetime import datetime
 
 STATE_DIR=Path("data")
 STATE_DIR.mkdir(exist_ok=True)
 TOP12_FILE=STATE_DIR/"usa_top12.json"
 CAND_FILE=STATE_DIR/"usa_candidates.json"
-KAKAO_TOKEN_FILE=STATE_DIR/"kakao_tokens.json"
-KAKAO_ALERT_FILE=STATE_DIR/"kakao_alerts.json"
-
-KAKAO_AUTHORIZE_URL="https://kauth.kakao.com/oauth/authorize"
-KAKAO_TOKEN_URL="https://kauth.kakao.com/oauth/token"
-KAKAO_MEMO_URL="https://kapi.kakao.com/v2/api/talk/memo/default/send"
-KAKAO_DEFAULT_REDIRECT_URI="https://eggpapa-hy-dynamic12-usa-app-s7ppvp.streamlit.app"
-
-def _secret_value(name, default=""):
-    """Streamlit Secrets -> 환경변수 순서로 읽습니다. 비밀값을 코드/GitHub에 넣지 않습니다."""
-    try:
-        if name in st.secrets:
-            return str(st.secrets[name]).strip()
-    except Exception:
-        pass
-    return str(os.getenv(name, default) or "").strip()
-
-def kakao_config():
-    return {
-        "rest_key": _secret_value("KAKAO_REST_API_KEY"),
-        "client_secret": _secret_value("KAKAO_CLIENT_SECRET"),
-        "redirect_uri": _secret_value("KAKAO_REDIRECT_URI", KAKAO_DEFAULT_REDIRECT_URI),
-    }
-
-def kakao_load_tokens():
-    return load_json(KAKAO_TOKEN_FILE,{})
-
-def kakao_save_tokens(tokens):
-    if isinstance(tokens,dict):
-        save_json(KAKAO_TOKEN_FILE,tokens)
-
-def kakao_authorize_url():
-    cfg=kakao_config()
-    if not cfg["rest_key"]:
-        return ""
-    state=secrets.token_urlsafe(24)
-    st.session_state["kakao_oauth_state"]=state
-    params={
-        "client_id":cfg["rest_key"],
-        "redirect_uri":cfg["redirect_uri"],
-        "response_type":"code",
-        "scope":"talk_message",
-        "state":state,
-    }
-    return KAKAO_AUTHORIZE_URL+"?"+urlencode(params)
-
-def kakao_exchange_code(code):
-    cfg=kakao_config()
-    data={
-        "grant_type":"authorization_code",
-        "client_id":cfg["rest_key"],
-        "redirect_uri":cfg["redirect_uri"],
-        "code":code,
-    }
-    if cfg["client_secret"]:
-        data["client_secret"]=cfg["client_secret"]
-    r=requests.post(KAKAO_TOKEN_URL,data=data,timeout=15)
-    if not r.ok:
-        raise RuntimeError(f"카카오 토큰 발급 실패 ({r.status_code}): {r.text[:300]}")
-    tok=r.json()
-    old=kakao_load_tokens()
-    if "refresh_token" not in tok and old.get("refresh_token"):
-        tok["refresh_token"]=old["refresh_token"]
-    tok["saved_at"]=datetime.now().isoformat(timespec="seconds")
-    kakao_save_tokens(tok)
-    return tok
-
-def kakao_refresh_tokens(tokens=None):
-    cfg=kakao_config(); tokens=tokens or kakao_load_tokens()
-    refresh=tokens.get("refresh_token")
-    if not refresh:
-        raise RuntimeError("카카오 리프레시 토큰이 없습니다. 다시 연결하세요.")
-    data={
-        "grant_type":"refresh_token",
-        "client_id":cfg["rest_key"],
-        "refresh_token":refresh,
-    }
-    if cfg["client_secret"]:
-        data["client_secret"]=cfg["client_secret"]
-    r=requests.post(KAKAO_TOKEN_URL,data=data,timeout=15)
-    if not r.ok:
-        raise RuntimeError(f"카카오 토큰 갱신 실패 ({r.status_code}): {r.text[:300]}")
-    new=r.json()
-    merged=dict(tokens); merged.update(new)
-    if not new.get("refresh_token"):
-        merged["refresh_token"]=refresh
-    merged["saved_at"]=datetime.now().isoformat(timespec="seconds")
-    kakao_save_tokens(merged)
-    return merged
-
-def kakao_send_me(text, link_url=None):
-    tokens=kakao_load_tokens()
-    access=tokens.get("access_token")
-    if not access:
-        return False,"카카오 계정 연결이 필요합니다."
-    link_url=link_url or kakao_config()["redirect_uri"]
-    template={
-        "object_type":"text",
-        "text":str(text)[:1900],
-        "link":{"web_url":link_url,"mobile_web_url":link_url},
-        "button_title":"HY DYNAMIC12 열기",
-    }
-    def _send(token):
-        return requests.post(
-            KAKAO_MEMO_URL,
-            headers={"Authorization":f"Bearer {token}"},
-            data={"template_object":json.dumps(template,ensure_ascii=False)},
-            timeout=15,
-        )
-    r=_send(access)
-    if r.status_code==401:
-        try:
-            tokens=kakao_refresh_tokens(tokens)
-            r=_send(tokens.get("access_token",""))
-        except Exception as e:
-            return False,str(e)
-    if not r.ok:
-        return False,f"카카오 메시지 실패 ({r.status_code}): {r.text[:300]}"
-    try:
-        result=r.json()
-        return result.get("result_code")==0, result
-    except Exception:
-        return True,r.text[:200]
-
-def kakao_alert_once(key,text):
-    sent=load_json(KAKAO_ALERT_FILE,{})
-    today=datetime.now().strftime("%Y-%m-%d")
-    full_key=f"{today}:{key}"
-    if sent.get(full_key):
-        return False,"오늘 이미 알림 전송됨"
-    ok,msg=kakao_send_me(text)
-    if ok:
-        sent[full_key]=datetime.now().isoformat(timespec="seconds")
-        save_json(KAKAO_ALERT_FILE,sent)
-    return ok,msg
-
-def check_entry_alerts(top):
-    """적극매수/매수후보의 1차·2차 매수가 도달 여부를 현재가로 확인해 1일 1회 알림."""
-    candidates=[x for x in top if str(x.get("판정","")).startswith(("적극매수","매수후보"))][:6]
-    events=[]
-    for r in candidates:
-        sym=str(r.get("티커","")).strip()
-        if not sym:
-            continue
-        try:
-            d=yf_daily(sym)
-            px=float(yf_price(sym,d))
-        except Exception:
-            continue
-        for label,col in [("1차매수가","1차매수가($)"),("2차매수가","2차매수가($)")]:
-            try:
-                target=float(r.get(col))
-            except Exception:
-                continue
-            if target>0 and px<=target:
-                score=r.get("판정점수",r.get("USA점수","-"))
-                txt=(f"🔔 HY DYNAMIC12 매수 알림\n"
-                     f"{sym} · {r.get('종목','')}\n"
-                     f"{label} 도달\n"
-                     f"현재가: ${px:,.2f}\n"
-                     f"기준가: ${target:,.2f}\n"
-                     f"판정: {r.get('판정','')} / {score}점")
-                ok,msg=kakao_alert_once(f"{sym}:{label}",txt)
-                events.append((sym,label,px,target,ok,msg))
-    return events
 
 def save_json(path,obj):
     try:
@@ -227,7 +57,96 @@ def usa_exit_plan(entry, current):
         return {"return_pct":0.0,"stage":"계산불가","action":"확인 필요"}
 
 
-st.set_page_config(page_title="HY DYNAMIC12 USA V2.1 MOBILE",page_icon="🇺🇸",layout="wide")
+
+def _us_market_regime():
+    """SPY 추세로 미국 시장을 강세/중립/약세로 단순 분류."""
+    try:
+        import yfinance as yf
+        d = yf.Ticker("SPY").history(period="1y", interval="1d", auto_adjust=True)
+        close = d["Close"].dropna()
+        if len(close) < 200:
+            return "중립장"
+        px = float(close.iloc[-1])
+        ma50 = float(close.tail(50).mean())
+        ma200 = float(close.tail(200).mean())
+        r20 = (px / float(close.iloc[-21]) - 1) * 100 if len(close) >= 21 else 0
+        if px > ma50 > ma200 and r20 > 0:
+            return "강세장"
+        if px < ma50 and px < ma200 and r20 < 0:
+            return "약세장"
+        return "중립장"
+    except Exception:
+        return "중립장"
+
+
+def _apply_relative_judgment(rows):
+    """
+    HY DYNAMIC12 USA V3 상대평가 판정.
+    강세장: 78점 이상 + 상위 10%
+    중립장: 78점 이상 + 상위 5%
+    약세장: 82점 이상 + 상위 3%
+
+    적극매수는 상대순위/최저점수뿐 아니라
+    거래대금·상대강도·추세 및 과열 안전장치를 함께 통과해야 함.
+    """
+    valid = [r for r in rows if isinstance(r.get("USA점수"), (int, float))]
+    valid.sort(key=lambda x: x["USA점수"], reverse=True)
+    n = len(valid)
+    regime = _us_market_regime()
+
+    if regime == "강세장":
+        min_score, active_pct = 78.0, 10.0
+    elif regime == "약세장":
+        min_score, active_pct = 82.0, 3.0
+    else:
+        min_score, active_pct = 78.0, 5.0
+
+    for i, r in enumerate(valid, 1):
+        score = float(r["USA점수"])
+        pct = round(i / max(1, n) * 100, 1)   # 낮을수록 상위
+        r["시장상태"] = regime
+        r["시장백분위(%)"] = pct
+        r["상대순위"] = f"상위 {pct:.1f}%"
+
+        value_ratio = float(r.get("거래대금배수") or 0)
+        rs20 = float(r.get("20일RS(%)") or 0)
+        rs60 = float(r.get("60일RS(%)") or 0)
+        near_high = float(r.get("120일고점대비(%)") or 0)
+        tech = float(r.get("기술") or 0)
+
+        # 미국판 수급 대용: 거래대금 증가 + 상대강도/추세
+        flow_pass = (value_ratio >= 1.0 and (rs20 > 0 or rs60 > 0))
+        trend_pass = (tech >= 60 and (rs20 > -3 or rs60 > 0))
+        overheated = (near_high >= 98 and float(r.get("ATR(%)") or 0) >= 5)
+
+        r["수급대용"] = "통과" if flow_pass else "대기"
+        r["추세필터"] = "통과" if trend_pass else "대기"
+        r["과열"] = "과열" if overheated else "정상"
+
+        active = (
+            score >= min_score
+            and pct <= active_pct
+            and flow_pass
+            and trend_pass
+            and not overheated
+        )
+
+        if active:
+            signal = "적극매수"
+        elif score >= 75 and pct <= max(10.0, active_pct * 2):
+            signal = "매수후보"
+        elif score >= 65:
+            signal = "관찰"
+        else:
+            signal = "현금대기"
+
+        r["판정"] = f"{signal} ({score:.1f}점 · 상위 {pct:.1f}%)"
+        r["판정점수"] = score
+
+    return valid, regime, min_score, active_pct
+
+
+st.set_page_config(page_title="HY DYNAMIC12 USA V3.0 RELATIVE",page_icon="🇺🇸",layout="wide")
 
 st.markdown("""
 <style>
@@ -249,11 +168,11 @@ div[data-testid="stDataFrame"] {font-size: 0.88rem;}
 }
 </style>
 """, unsafe_allow_html=True)
-st.title("HY DYNAMIC12 USA V2.1 MOBILE · AUTO JUDGMENT")
-st.caption("NASDAQ · NYSE · AMEX → 거래대금/시총/거래증가/신고가 → 주도주 정밀분석 → 오늘의 USA TOP12")
+st.title("HY DYNAMIC12 USA V3.0 RELATIVE · AUTO JUDGMENT")
+st.caption("NASDAQ · NYSE · AMEX → 종합점수 + 시장백분위 + 수급대용 + 추세 + 과열필터 → USA TOP12")
 s=settings()
 
-tabs=st.tabs(["오늘 TOP12","미국시장 스캔","상세","자금관리","KIS 설정","전략 규칙","🔔 카카오 알림"])
+tabs=st.tabs(["오늘 TOP12","미국시장 스캔","상세","자금관리","KIS 설정","전략 규칙"])
 
 with tabs[4]:
     st.subheader("KIS 설정")
@@ -338,11 +257,15 @@ with tabs[1]:
                     st.session_state.setdefault("us_precision_errors",[]).append(f"{sym}: {errtxt}")
                 bar.progress((i+1)/max(1,len(recs)))
             rows.sort(key=lambda x:x["USA점수"] if isinstance(x.get("USA점수"),(int,float)) else -1,reverse=True)
-            for n,r in enumerate(rows,1):r["순위"]=n
-            valid_rows=[x for x in rows if isinstance(x.get("USA점수"),(int,float))]
+            valid_rows, regime, min_score, active_pct = _apply_relative_judgment(rows)
+            for n,r in enumerate(valid_rows,1): r["순위"]=n
             st.session_state["us_ranked"]=valid_rows; st.session_state["us_details"]=details
+            st.session_state["us_market_regime"]=regime
             save_json(TOP12_FILE,valid_rows[:12])
-            bar.empty();msg.success(f"USA TOP12 생성 완료 · 정상분석 {len(valid_rows)}개")
+            bar.empty();msg.success(
+                f"USA TOP12 생성 완료 · 정상분석 {len(valid_rows)}개 · "
+                f"{regime} / 적극매수 기준 {min_score:.0f}점+상위 {active_pct:.0f}%"
+            )
 
 with tabs[0]:
     rows=st.session_state.get("us_ranked",[])
@@ -462,7 +385,7 @@ with tabs[0]:
                     st.error("USA TOP12 자동 생성 실패")
                     st.exception(e)
     else:
-        buys=[r for r in top if str(r["판정"]).startswith(("적극매수","매수후보"))]
+        buys=[r for r in top if str(r["판정"]).startswith("적극매수")]
         a,b,c,d=st.columns(4)
         a.metric("오늘 1위",top[0]["티커"]); b.metric("USA점수",top[0]["USA점수"])
         c.metric("진입후보",len(buys)); d.metric("운용원칙","최대 6종목")
@@ -473,7 +396,7 @@ with tabs[0]:
             st.rerun()
         else: st.warning("TOP12 안에도 적극매수/매수후보 없음 — 현금대기")
         st.markdown("### 📱 아이폰 핵심 보기")
-        _mobile_cols=[c for c in ["순위","티커","종목","현재가($)","판정점수","판정표시","1차매수가($)","2차매수가($)","3%손절가($)","+15%목표($)"] if c in pd.DataFrame(top).columns]
+        _mobile_cols=[c for c in ["순위","티커","종목","현재가($)","판정점수","시장상태","상대순위","수급대용","과열","판정표시","1차매수가($)","2차매수가($)","3%손절가($)","+15%목표($)"] if c in pd.DataFrame(top).columns]
         _mobile_df=pd.DataFrame(top)[_mobile_cols].head(12)
         st.dataframe(_mobile_df,use_container_width=True,hide_index=True,height=460)
         _top_df=pd.DataFrame(top)
@@ -487,7 +410,7 @@ with tabs[0]:
         if "판정" in _top_df.columns:
             _top_df["판정표시"]=_top_df["판정"].map(_judgment_badge)
             # 판정 관련 열을 앞쪽으로 이동해 가로 스크롤 없이 확인
-            _front=[c for c in ["순위","종목","티커","현재가($)","USA점수","판정점수","판정표시","1차매수가($)","2차매수가($)","평균매수가($)","3%손절가($)","+15%목표($)","+20%목표($)","+25%목표($)"] if c in _top_df.columns]
+            _front=[c for c in ["순위","종목","티커","현재가($)","USA점수","판정점수","시장상태","상대순위","수급대용","과열","판정표시","1차매수가($)","2차매수가($)","평균매수가($)","3%손절가($)","+15%목표($)","+20%목표($)","+25%목표($)"] if c in _top_df.columns]
             _rest=[c for c in _top_df.columns if c not in _front and c!="판정"]
             _top_df=_top_df[_front+_rest]
         st.dataframe(_top_df,use_container_width=True,hide_index=True,height=520,
@@ -499,7 +422,7 @@ with tabs[0]:
                            "판정표시":st.column_config.TextColumn("판정",width="medium")})
         st.caption("판정 색상: 🔴 적극매수 · 🟡 매수후보 · 🔵 관찰 · ⚪ 현금대기  |  표 전체 배경색은 적용하지 않아 글자가 선명하게 보입니다.")
 
-        _entry_candidates=[x for x in top if str(x.get("판정","")).startswith(("적극매수","매수후보"))][:3]
+        _entry_candidates=[x for x in top if str(x.get("판정","")).startswith("적극매수")][:3]
         st.markdown("### 최종 3종목 후보")
         if _entry_candidates:
             cols=st.columns(3)
@@ -555,7 +478,7 @@ with tabs[3]:
     d3.metric("2차 USD",f"${second_usd:,.0f}")
 
     st.markdown("### 최종 3종목 운용 원칙")
-    st.write("TOP12 중 **적극매수/매수후보이면서 판정점수가 높은 종목을 최대 3개**만 선택합니다.")
+    st.write("TOP12 중 **상대평가·최저점수·수급대용·추세·과열필터를 모두 통과한 적극매수 종목만 최대 3개** 선택합니다.")
     st.write("3개를 무조건 채우지 않습니다. 진입신호가 1개면 1개만 사고, 나머지 자금은 현금으로 둡니다.")
     st.write("기본값은 **종목당 1,000만원 → 1차 500만원 → 조건 재확인 → 2차 500만원**입니다.")
 
@@ -563,119 +486,6 @@ with tabs[3]:
     st.info("기본 목표 +15% · +10%에서는 추세 확인 · +15% 30~50% 분할매도 · +20% 추가 25% · +25% 추가 25% · 잔여분 추세보유")
     st.write("손절은 **최종 평균매수가 대비 -3%**를 기본 실행 기준으로 사용합니다. ATR은 분석용 변동성 지표로만 유지합니다.")
     st.caption("환율·환전수수료·매매수수료·세금은 실제 증권사 조건에 맞춰 별도로 확인하세요.")
-
-# 카카오 OAuth 콜백 처리
-try:
-    _qp=st.query_params
-    _kcode=_qp.get("code")
-    _kstate=_qp.get("state")
-    _kerr=_qp.get("error")
-    if _kerr:
-        st.session_state["kakao_oauth_notice"]=("error",f"카카오 연결 취소/실패: {_kerr}")
-    elif _kcode and not st.session_state.get("kakao_code_done"):
-        _expected=st.session_state.get("kakao_oauth_state")
-        if _expected and _kstate!=_expected:
-            st.session_state["kakao_oauth_notice"]=("error","카카오 로그인 보안 state 값이 일치하지 않습니다. 다시 연결하세요.")
-        else:
-            try:
-                kakao_exchange_code(_kcode)
-                st.session_state["kakao_code_done"]=True
-                st.session_state["kakao_oauth_notice"]=("success","카카오 계정 연결이 완료되었습니다.")
-                try:
-                    st.query_params.clear()
-                except Exception:
-                    pass
-            except Exception as _e:
-                st.session_state["kakao_oauth_notice"]=("error",str(_e))
-except Exception:
-    pass
-
-with tabs[6]:
-    st.subheader("🔔 카카오 알림")
-    st.caption("본인 카카오톡의 ‘나와의 채팅’으로 HY DYNAMIC12 알림을 보냅니다.")
-    _cfg=kakao_config()
-    _tokens=kakao_load_tokens()
-    _notice=st.session_state.pop("kakao_oauth_notice",None)
-    if _notice:
-        (st.success if _notice[0]=="success" else st.error)(_notice[1])
-
-    if not _cfg["rest_key"] or not _cfg["client_secret"]:
-        st.warning("Streamlit Secrets에 KAKAO_REST_API_KEY와 KAKAO_CLIENT_SECRET을 먼저 등록하세요.")
-        st.code('KAKAO_REST_API_KEY = "..."\nKAKAO_CLIENT_SECRET = "..."\nKAKAO_REDIRECT_URI = "https://eggpapa-hy-dynamic12-usa-app-s7ppvp.streamlit.app"',language="toml")
-    else:
-        c1,c2,c3=st.columns(3)
-        c1.metric("REST API 설정","완료")
-        c2.metric("카카오 연결","연결됨" if _tokens.get("refresh_token") else "미연결")
-        c3.metric("talk_message","동의 설정 완료")
-
-        _auth_url=kakao_authorize_url()
-        if _auth_url:
-            st.link_button("💬 카카오 계정 연결/재연결",_auth_url,use_container_width=True)
-
-        if _tokens.get("refresh_token"):
-            if st.button("🧪 카카오 테스트 메시지 보내기",use_container_width=True):
-                _ok,_msg=kakao_send_me("✅ HY DYNAMIC12 카카오 알림 연결 테스트 성공")
-                if _ok: st.success("카카오톡 ‘나와의 채팅’을 확인하세요.")
-                else: st.error(str(_msg))
-
-            st.markdown("#### 매수가 도달 확인")
-            st.caption("앱이 열려 있을 때 TOP12의 적극매수/매수후보를 확인합니다. 같은 종목·같은 단계 알림은 하루 1회만 보냅니다.")
-            if st.button("🔎 지금 가격 확인 → 도달 시 카카오 알림",type="primary",use_container_width=True):
-                _rows=st.session_state.get("us_ranked",[]) or load_json(TOP12_FILE,[])
-                _top=[r for r in _rows if isinstance(r.get("USA점수"),(int,float))][:12]
-                if not _top:
-                    st.warning("먼저 오늘 TOP12를 생성하세요.")
-                else:
-                    _events=check_entry_alerts(_top)
-                    _sent=[e for e in _events if e[4]]
-                    if _sent:
-                        for _e in _sent:
-                            st.success(f"{_e[0]} {_e[1]} 도달 · 현재 ${_e[2]:.2f} / 기준 ${_e[3]:.2f} · 카카오 전송")
-                    elif _events:
-                        st.info("도달 종목은 있지만 오늘 이미 알림을 보낸 항목입니다.")
-                    else:
-                        st.info("현재 1차/2차 매수가에 도달한 진입후보가 없습니다.")
-
-            if st.button("🔄 액세스 토큰 갱신",use_container_width=True):
-                try:
-                    kakao_refresh_tokens()
-                    st.success("토큰 갱신 완료")
-                except Exception as _e:
-                    st.error(str(_e))
-
-            with st.expander("⚙️ GitHub 자동감시 설정", expanded=False):
-                st.caption("GitHub Actions가 앱이 닫혀 있어도 미국 정규장 중 가격을 확인하도록 설정할 때 사용합니다.")
-                _rt=str(_tokens.get("refresh_token","") or "")
-                if _rt:
-                    st.text_input("KAKAO_REFRESH_TOKEN", value=_rt, type="password", help="GitHub 저장소의 Settings → Secrets and variables → Actions에만 저장하세요. 채팅/코드에는 올리지 마세요.")
-                _rows_auto=st.session_state.get("us_ranked",[]) or load_json(TOP12_FILE,[])
-                _auto_candidates=[x for x in _rows_auto if str(x.get("판정","")).startswith(("적극매수","매수후보"))][:6]
-                _watch=[]
-                for _r in _auto_candidates:
-                    try:
-                        _watch.append({
-                            "ticker":str(_r.get("티커","")),
-                            "name":str(_r.get("종목","")),
-                            "mode":"candidate",
-                            "entry1":float(_r.get("1차매수가($)")),
-                            "entry2":float(_r.get("2차매수가($)")),
-                            "enabled":True,
-                        })
-                    except Exception:
-                        pass
-                if _watch:
-                    st.download_button(
-                        "⬇️ 현재 진입후보 자동감시 watchlist 다운로드",
-                        data=json.dumps(_watch,ensure_ascii=False,indent=2),
-                        file_name="kakao_watchlist.json",
-                        mime="application/json",
-                        use_container_width=True,
-                    )
-                    st.caption("TOP12를 새로 만든 날에는 이 파일을 다시 내려받아 GitHub의 data/kakao_watchlist.json과 교체하면 자동감시 대상도 갱신됩니다.")
-                else:
-                    st.info("현재 적극매수/매수후보가 없어 자동감시 watchlist를 만들 종목이 없습니다.")
-
-        st.info("24시간 백그라운드 감시는 Streamlit 단독으로 보장되지 않습니다. GitHub Actions 자동감시를 함께 설정하면 앱을 닫아도 미국 정규장 중 주기적으로 가격을 확인할 수 있습니다.")
 
 with tabs[5]:
     st.markdown("""
@@ -716,7 +526,7 @@ with tabs[5]:
 - KIS 조회가 일시 실패하거나 데이터가 부족하면 **yfinance를 보조 데이터원으로 자동 전환**합니다.
 - 정상 분석된 종목만 저장하며 화면에는 상위 12개만 TOP12로 표시합니다.
 
-### HY DYNAMIC12 USA V2.1 MOBILE 구조
+### HY DYNAMIC12 USA V3.0 RELATIVE 구조
 - 대상: **NASDAQ + NYSE + AMEX**
 - 1차 후보: **거래대금 + 시가총액 + 거래증가 + 신고가**
 - 정밀분석: **20/50/200일 추세 + 20/60일 모멘텀 + 거래대금 + ATR + 과이격**
