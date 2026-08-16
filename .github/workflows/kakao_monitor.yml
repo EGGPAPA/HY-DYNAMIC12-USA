@@ -2,9 +2,12 @@ name: HY DYNAMIC12 Kakao Monitor
 
 on:
   schedule:
-  - cron: '30-59/15 13 * * 1-5'
-  - cron: '*/15 14-19 * * 1-5'
-  - cron: '0 20 * * 1-5'
+    # GitHub cron is UTC.
+    # Run broadly enough to cover both EDT and EST.
+    # Python checks America/New_York and exits outside 09:30~16:00 ET.
+    - cron: '30-59/15 13 * * 1-5'
+    - cron: '*/15 14-20 * * 1-5'
+    - cron: '0 21 * * 1-5'
   workflow_dispatch:
 
 permissions:
