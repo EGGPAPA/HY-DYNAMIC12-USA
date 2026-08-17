@@ -1,1 +1,13 @@
-[]
+[
+  {
+    "ticker": "NU",
+    "name": "Nu Holdings",
+    "mode": "holding",
+    "status": "holding",
+    "average_price": 14.23,
+    "quantity": 1.0,
+    "stop_loss_pct": 3,
+    "enabled": true,
+    "updated_at": "2026-08-17T02:52:36.315808+00:00"
+  }
+]
