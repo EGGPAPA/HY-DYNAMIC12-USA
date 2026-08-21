@@ -224,6 +224,10 @@ def scan_leader_entries():
             volume=pd.to_numeric(d["Volume"],errors="coerce").reindex(close.index).dropna()
             if len(close)<61 or len(volume)<20:
                 continue
+            latest_date=pd.Timestamp(close.index[-1]).date()
+            forced=os.environ.get("FORCE_RUN", "").lower() in {"1", "true", "yes"}
+            if not forced and latest_date != ny_now().date():
+                continue
             price=float(close.iloc[-1])
             ma20=float(close.tail(20).mean())
             ma60=float(close.tail(60).mean())
