@@ -230,6 +230,8 @@ def monitor_leader_entries(state, access_token):
             "🟢 미국 주도 업종 1차 분할매수 검토\n\n"
             f"업종: {item['sector']}\n"
             f"대표 종목: {ticker}\n"
+            f"최초 포착일: {item['leader_start']}\n"
+            f"주도 지속: {item['leader_days']}거래일\n"
             f"현재가: ${item['price']:.2f}\n"
             f"1차 관찰가: ${item['observation']:.2f}\n"
             f"20일 수익률: {item['return20']:+.1f}%\n"
