@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import pandas as pd
 import requests
 import streamlit as st
+import yfinance as yf
 
 REPO = "EGGPAPA/HY-DYNAMIC12-USA"
 BRANCH = "main"
@@ -67,6 +68,32 @@ def find_holding(rows, ticker):
     return None, None
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def current_prices(tickers):
+    symbols=[str(x).strip().upper() for x in tickers if str(x).strip()]
+    if not symbols:
+        return {}
+    prices={}
+    for period, interval in (("1d","1m"),("5d","1d")):
+        missing=[x for x in symbols if x not in prices]
+        if not missing:
+            break
+        try:
+            data=yf.download(missing,period=period,interval=interval,prepost=False,
+                             auto_adjust=True,progress=False,threads=True,group_by="ticker")
+            for ticker in missing:
+                try:
+                    d=data[ticker] if isinstance(data.columns,pd.MultiIndex) else data
+                    close=pd.to_numeric(d["Close"],errors="coerce").dropna()
+                    if not close.empty:
+                        prices[ticker]=float(close.iloc[-1])
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return prices
+
+
 try:
     holdings, holdings_sha = load_holdings()
 except Exception as e:
@@ -81,14 +108,20 @@ c2.metric("GitHub 저장", "가능" if GITHUB_PAT else "GITHUB_PAT 필요")
 c3.metric("자동감시", "연결됨")
 
 if active:
+    prices=current_prices(tuple(str(r.get("ticker","")).strip().upper() for r in active))
     view = []
     for r in active:
         avg = float(r.get("average_price", 0) or 0)
         qty = float(r.get("quantity", 0) or 0)
+        ticker = str(r.get("ticker", "")).strip().upper()
+        current = prices.get(ticker)
+        return_pct = ((current / avg) - 1) * 100 if current is not None and avg > 0 else None
         view.append({
-            "티커": r.get("ticker", ""),
+            "티커": ticker,
             "종목명": r.get("name", ""),
             "평균매수가($)": round(avg, 4),
+            "현재가($)": round(current, 2) if current is not None else "조회 대기",
+            "수익률(%)": round(return_pct, 2) if return_pct is not None else "-",
             "수량": qty,
             "투입금액($)": round(avg * qty, 2),
             "손절(-3%)": round(avg * 0.97, 2) if avg else None,
@@ -188,3 +221,4 @@ else:
     st.caption("전량 매도 처리할 보유종목이 없습니다.")
 
 st.info("보유종목은 TOP12에서 빠져도 holdings.json에 남아 있으며, GitHub Actions가 미국 정규장 동안 평균매수가 기준 -3%, +15%, +20%, +25%를 계속 감시합니다.")
+
