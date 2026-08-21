@@ -433,6 +433,7 @@ def render_usa_leader_entry_panel():
                 rows.append({
                     "종목":x["ticker"],"현재가($)":round(x["price"],2),
                     "20일 수익률(%)":round(x["return20"],1),"60일 수익률(%)":round(x["return60"],1),
+                    "최초 포착일":x["leader_start"],"주도 지속(거래일)":x["leader_days"],
                     "1차 관찰가($)":round(x["observation"],2),
                     "관찰가 ±2%":"✅" if x["near_observation"] else "대기",
                     "20일선 위":"✅" if x["above_ma20"] else "대기",
