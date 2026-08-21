@@ -418,13 +418,22 @@ def render_usa_leader_entry_panel():
         st.success("1차 분할매수 검토: "+", ".join(f"{x['sector']} · {x['ticker']}" for x in ready))
     else:
         st.info("현재 네 조건을 모두 충족한 종목은 없습니다. 자동 감시는 계속됩니다.")
-    summary=[{
-        "업종":s["sector"],"업종 20일(%)":round(s["return20"],1),
-        "업종 60일(%)":round(s["return60"],1),"상승종목 비율(%)":round(s["breadth"],0),
-        "평가":"🟢 강세" if s["strength"]=="강세" else "🔵 중립",
-        "대표 종목":", ".join(x["ticker"] for x in s["representatives"]),
-        "업종점수":round(s["score"],1),
-    } for s in sectors]
+    summary=[]
+    for s in sectors:
+        leader=s["representatives"][0] if s["representatives"] else {}
+        summary.append({
+            "업종":s["sector"],
+            "최강 종목":f"⭐ {leader.get('ticker','-')}",
+            "현재가($)":round(leader["price"],2) if leader else "-",
+            "종목 20일(%)":round(leader["return20"],1) if leader else "-",
+            "주도 지속":f"{leader.get('leader_days',0)}일" if leader else "-",
+            "매수 신호":"🟢 1차 검토" if leader.get("ready") else "⏳ 관찰",
+            "업종 20일(%)":round(s["return20"],1),
+            "상승종목 비율(%)":round(s["breadth"],0),
+            "업종 평가":"🟢 강세" if s["strength"]=="강세" else "🔵 중립",
+            "2·3위 종목":", ".join(x["ticker"] for x in s["representatives"][1:]) or "-",
+            "업종점수":round(s["score"],1),
+        })
     st.dataframe(pd.DataFrame(summary),use_container_width=True,hide_index=True)
     for sector in sectors:
         with st.expander(f"{sector['sector']} · 대표 종목 {len(sector['representatives'])}개",expanded=sector is sectors[0]):
