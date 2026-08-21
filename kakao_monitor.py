@@ -2,11 +2,10 @@ import os
 import json
 import requests
 import yfinance as yf
-import pandas as pd
 from datetime import datetime, time, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from rank_us import YAHOO_UNIVERSE
+from us_sector_leaders import scan_sector_leaders
 
 WATCHLIST_FILE = Path("kakao_watchlist.json")
 HOLDINGS_FILE = Path("holdings.json")
@@ -209,58 +208,15 @@ def monitor_holding(item, price, state, access_token):
 
 
 def scan_leader_entries():
-    """앱 저장 데이터와 무관하게 미국 핵심 종목군에서 주도주 1차 매수조건을 계산합니다."""
-    excluded={"SPY","QQQ","IWM","DIA","SOXL","TQQQ","ARKK","SMH","XLK","XLE"}
-    symbols=list(dict.fromkeys(
-        sym for items in YAHOO_UNIVERSE.values() for sym in items if sym not in excluded
-    ))
-    data=yf.download(symbols,period="6mo",interval="1d",auto_adjust=True,
-                     progress=False,threads=True,group_by="ticker")
-    leaders=[]
-    for ticker in symbols:
-        try:
-            d=data[ticker] if isinstance(data.columns,pd.MultiIndex) else data
-            close=pd.to_numeric(d["Close"],errors="coerce").dropna()
-            volume=pd.to_numeric(d["Volume"],errors="coerce").reindex(close.index).dropna()
-            if len(close)<61 or len(volume)<20:
-                continue
-            latest_date=pd.Timestamp(close.index[-1]).date()
-            forced=os.environ.get("FORCE_RUN", "").lower() in {"1", "true", "yes"}
-            if not forced and latest_date != ny_now().date():
-                continue
-            price=float(close.iloc[-1])
-            ma20=float(close.tail(20).mean())
-            ma60=float(close.tail(60).mean())
-            return20=(price/float(close.iloc[-21])-1)*100
-            return60=(price/float(close.iloc[-61])-1)*100
-            volume_ratio=float(volume.tail(5).mean()/max(volume.tail(20).mean(),1))
-            if not (price>ma20>ma60 and return20>=5):
-                continue
-            observation=ma20*1.02
-            invalidation=ma60*.97
-            checks={
-                "near_observation":abs(price/observation-1)<=.02,
-                "above_ma20":price>=ma20,
-                "volume_ok":volume_ratio>=.7,
-                "above_invalidation":price>invalidation,
-            }
-            score=min(100,max(0,55+return20*1.2+return60*.35+min(volume_ratio,2)*8))
-            leaders.append({
-                "ticker":ticker,"price":price,"ma20":ma20,"ma60":ma60,
-                "return20":return20,"return60":return60,"volume_ratio":volume_ratio,
-                "observation":observation,"invalidation":invalidation,
-                "ready":all(checks.values()),"score":score,**checks,
-            })
-        except Exception as e:
-            print(f"{ticker}: 주도주 분석 오류 {e}")
-    leaders.sort(key=lambda x:x["score"],reverse=True)
-    return leaders[:12]
+    """강한 업종을 먼저 고른 뒤 업종별 대표 종목만 알림 후보로 반환합니다."""
+    sectors=scan_sector_leaders(max_sectors=5,representatives=3,require_today=True)
+    return [stock for sector in sectors for stock in sector["representatives"]]
 
 
 def monitor_leader_entries(state, access_token):
     leaders=scan_leader_entries()
     ready=[x for x in leaders if x["ready"]]
-    print(f"강한 주도주 {len(leaders)}종목 / 4조건 충족 {len(ready)}종목")
+    print(f"주도 업종 대표 {len(leaders)}종목 / 4조건 충족 {len(ready)}종목")
     changed=False
     today=ny_now().strftime("%Y-%m-%d")
     for item in ready:
@@ -271,8 +227,9 @@ def monitor_leader_entries(state, access_token):
         if access_token is None:
             access_token=get_access_token()
         message=(
-            "🟢 미국 주도주 1차 분할매수 검토\n\n"
-            f"종목: {ticker}\n"
+            "🟢 미국 주도 업종 1차 분할매수 검토\n\n"
+            f"업종: {item['sector']}\n"
+            f"대표 종목: {ticker}\n"
             f"현재가: ${item['price']:.2f}\n"
             f"1차 관찰가: ${item['observation']:.2f}\n"
             f"20일 수익률: {item['return20']:+.1f}%\n"

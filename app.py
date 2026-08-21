@@ -5,7 +5,8 @@ install_holdings_tab()
 import pandas as pd
 from config import settings,save
 from kis_us import KISUS, yf_daily, yf_price, yf_info_safe
-from rank_us import USScanner, YAHOO_UNIVERSE
+from rank_us import USScanner
+from us_sector_leaders import scan_sector_leaders
 from engine import analyze
 from leader import leader_metrics
 from fundamental_us import score_yf
@@ -393,70 +394,54 @@ def render_usa_top12_blink(top):
 
 @st.cache_data(ttl=600, show_spinner=False)
 def usa_leader_entry_conditions():
-    """미국 핵심 유동성 종목군에서 강한 주도주와 1차 분할매수 조건을 계산합니다."""
-    import yfinance as yf
-    symbols=list(dict.fromkeys(
-        sym for items in YAHOO_UNIVERSE.values() for sym in items
-        if sym not in {"SPY","QQQ","IWM","DIA","SOXL","TQQQ","ARKK","SMH","XLK","XLE"}
-    ))
-    raw=yf.download(symbols,period="6mo",interval="1d",auto_adjust=True,
-                    progress=False,threads=True,group_by="ticker")
-    rows=[]
-    for sym in symbols:
-        try:
-            d=raw[sym] if isinstance(raw.columns,pd.MultiIndex) else raw
-            close=pd.to_numeric(d["Close"],errors="coerce").dropna()
-            volume=pd.to_numeric(d["Volume"],errors="coerce").reindex(close.index).dropna()
-            if len(close)<61 or len(volume)<20:
-                continue
-            px=float(close.iloc[-1]); ma20=float(close.tail(20).mean()); ma60=float(close.tail(60).mean())
-            r20=(px/float(close.iloc[-21])-1)*100
-            r60=(px/float(close.iloc[-61])-1)*100
-            vr=float(volume.tail(5).mean()/max(volume.tail(20).mean(),1))
-            watch=ma20*1.02; invalid=ma60*.97
-            strong=px>ma20>ma60 and r20>=5
-            if not strong:
-                continue
-            near=abs(px/watch-1)<=.02
-            above20=px>=ma20
-            volume_ok=vr>=.7
-            valid=px>invalid
-            ready=near and above20 and volume_ok and valid
-            score=min(100,max(0,55+r20*1.2+r60*.35+min(vr,2)*8))
-            rows.append({
-                "종목":sym,"현재가($)":round(px,2),"20일 수익률(%)":round(r20,1),
-                "60일 수익률(%)":round(r60,1),"1차 관찰가($)":round(watch,2),
-                "관찰가 ±2%":"✅" if near else "대기","20일선 위":"✅" if above20 else "대기",
-                "거래량 ≥0.7배":"✅" if volume_ok else "대기","무효선 위":"✅" if valid else "대기",
-                "최종 신호":"🟢 1차 분할매수 검토" if ready else "⏳ 관찰",
-                "주도점수":round(score,1),
-            })
-        except Exception:
-            continue
-    return sorted(rows,key=lambda x:(x["최종 신호"].startswith("🟢"),x["주도점수"]),reverse=True)[:12]
+    """강한 업종을 먼저 찾고 업종별 대표 주도주 2~3개를 반환합니다."""
+    return scan_sector_leaders(max_sectors=5,representatives=3)
 
 
 def render_usa_leader_entry_panel():
-    st.subheader("🚦 미국 주도주 1차 매수조건")
-    st.caption("미국 핵심 유동성 종목 중 20일·60일 상승추세의 상위 주도주를 선별합니다. 네 조건이 모두 충족되어야 알림 대상입니다.")
+    st.subheader("🚦 미국 주도 업종 · 대표 종목")
+    st.caption("업종의 20일·60일 성과와 상승 종목 비율을 먼저 평가하고, 강한 업종마다 대표 종목 2~3개만 선별합니다.")
     try:
-        rows=usa_leader_entry_conditions()
+        sectors=usa_leader_entry_conditions()
     except Exception as e:
-        st.warning(f"주도주 조건을 불러오지 못했습니다: {e}")
+        st.warning(f"주도 업종을 불러오지 못했습니다: {e}")
         return
-    if not rows:
-        st.info("현재 강한 상승추세 기준을 통과한 미국 주도주가 없습니다.")
+    if not sectors:
+        st.info("현재 강세 기준을 통과한 미국 주도 업종이 없습니다.")
         return
-    ready=[r for r in rows if r["최종 신호"].startswith("🟢")]
+    ready=[x for s in sectors for x in s["representatives"] if x["ready"]]
     c1,c2,c3=st.columns(3)
-    c1.metric("강한 주도주",f"{len(rows)}종목")
+    c1.metric("주도 업종",f"{len(sectors)}개")
     c2.metric("4조건 충족",f"{len(ready)}종목")
-    c3.metric("자동 감시","미국 정규장")
+    c3.metric("업종별 대표","최대 3종목")
     if ready:
-        st.success("1차 분할매수 검토: "+", ".join(r["종목"] for r in ready))
+        st.success("1차 분할매수 검토: "+", ".join(f"{x['sector']} · {x['ticker']}" for x in ready))
     else:
         st.info("현재 네 조건을 모두 충족한 종목은 없습니다. 자동 감시는 계속됩니다.")
-    st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+    summary=[{
+        "업종":s["sector"],"업종 20일(%)":round(s["return20"],1),
+        "업종 60일(%)":round(s["return60"],1),"상승종목 비율(%)":round(s["breadth"],0),
+        "평가":"🟢 강세" if s["strength"]=="강세" else "🔵 중립",
+        "대표 종목":", ".join(x["ticker"] for x in s["representatives"]),
+        "업종점수":round(s["score"],1),
+    } for s in sectors]
+    st.dataframe(pd.DataFrame(summary),use_container_width=True,hide_index=True)
+    for sector in sectors:
+        with st.expander(f"{sector['sector']} · 대표 종목 {len(sector['representatives'])}개",expanded=sector is sectors[0]):
+            rows=[]
+            for x in sector["representatives"]:
+                rows.append({
+                    "종목":x["ticker"],"현재가($)":round(x["price"],2),
+                    "20일 수익률(%)":round(x["return20"],1),"60일 수익률(%)":round(x["return60"],1),
+                    "1차 관찰가($)":round(x["observation"],2),
+                    "관찰가 ±2%":"✅" if x["near_observation"] else "대기",
+                    "20일선 위":"✅" if x["above_ma20"] else "대기",
+                    "거래량 ≥0.7배":"✅" if x["volume_ok"] else "대기",
+                    "무효선 위":"✅" if x["above_invalidation"] else "대기",
+                    "최종 신호":"🟢 1차 분할매수 검토" if x["ready"] else "⏳ 관찰",
+                    "주도점수":round(x["score"],1),
+                })
+            st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
 
 
 tabs=st.tabs(["오늘 TOP12","미국시장 스캔","상세","자금관리","KIS 설정","🔔 카카오","전략 규칙"])
