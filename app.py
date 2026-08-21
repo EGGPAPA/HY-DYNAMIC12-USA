@@ -393,7 +393,7 @@ def render_usa_top12_blink(top):
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def usa_leader_entry_conditions():
+def usa_leader_entry_conditions(cache_version="sector-duration-v2"):
     """강한 업종을 먼저 찾고 업종별 대표 주도주 2~3개를 반환합니다."""
     return scan_sector_leaders(max_sectors=5,representatives=3)
 
@@ -433,7 +433,8 @@ def render_usa_leader_entry_panel():
                 rows.append({
                     "종목":x["ticker"],"현재가($)":round(x["price"],2),
                     "20일 수익률(%)":round(x["return20"],1),"60일 수익률(%)":round(x["return60"],1),
-                    "최초 포착일":x["leader_start"],"주도 지속(거래일)":x["leader_days"],
+                    "최초 포착일":x.get("leader_start","-"),
+                    "주도 지속(거래일)":x.get("leader_days",0),
                     "1차 관찰가($)":round(x["observation"],2),
                     "관찰가 ±2%":"✅" if x["near_observation"] else "대기",
                     "20일선 위":"✅" if x["above_ma20"] else "대기",
