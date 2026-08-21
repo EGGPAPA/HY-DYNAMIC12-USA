@@ -49,6 +49,19 @@ def scan_sector_leaders(max_sectors=5, representatives=3, require_today=False):
                 r20=(price/float(close.iloc[-21])-1)*100
                 r60=(price/float(close.iloc[-61])-1)*100
                 vr=float(volume.tail(5).mean()/max(volume.tail(20).mean(),1))
+                ma20_series=close.rolling(20).mean()
+                ma60_series=close.rolling(60).mean()
+                r20_series=close.pct_change(20)*100
+                leader_flags=(close>ma20_series)&(ma20_series>ma60_series)&(r20_series>=5)
+                leader_days=0
+                for flag in reversed(leader_flags.fillna(False).tolist()):
+                    if not flag:
+                        break
+                    leader_days+=1
+                leader_start=(
+                    pd.Timestamp(close.index[-leader_days]).strftime("%Y-%m-%d")
+                    if leader_days else "-"
+                )
                 observation=ma20*1.02; invalidation=ma60*.97
                 checks={
                     "near_observation":abs(price/observation-1)<=.02,
@@ -63,6 +76,7 @@ def scan_sector_leaders(max_sectors=5, representatives=3, require_today=False):
                     "return20":r20,"return60":r60,"volume_ratio":vr,
                     "observation":observation,"invalidation":invalidation,
                     "trend":trend,"ready":trend and r20>=5 and all(checks.values()),
+                    "leader_start":leader_start,"leader_days":leader_days,
                     "score":score,**checks,
                 })
             except Exception:
