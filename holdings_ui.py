@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import pandas as pd
 import requests
 import streamlit as st
+import yfinance as yf
 
 from usa_asset_split_ui import render_stock_tab, render_etf_tab, ETF_UNIVERSE
 from portfolio_ui import render_portfolio_tab
@@ -63,13 +64,57 @@ def _asset_type(row):
     return "ETF" if str(row.get("ticker", "")).strip().upper() in ETF_UNIVERSE else "STOCK"
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _current_prices(tickers):
+    symbols=[str(x).strip().upper() for x in tickers if str(x).strip()]
+    if not symbols:
+        return {}
+    prices={}
+    try:
+        data=yf.download(symbols,period="1d",interval="1m",prepost=False,
+                         auto_adjust=True,progress=False,threads=True,group_by="ticker")
+        for ticker in symbols:
+            try:
+                d=data[ticker] if isinstance(data.columns,pd.MultiIndex) else data
+                close=pd.to_numeric(d["Close"],errors="coerce").dropna()
+                if not close.empty:
+                    prices[ticker]=float(close.iloc[-1])
+            except Exception:
+                continue
+    except Exception:
+        pass
+    missing=[x for x in symbols if x not in prices]
+    if missing:
+        try:
+            data=yf.download(missing,period="5d",interval="1d",auto_adjust=True,
+                             progress=False,threads=True,group_by="ticker")
+            for ticker in missing:
+                try:
+                    d=data[ticker] if isinstance(data.columns,pd.MultiIndex) else data
+                    close=pd.to_numeric(d["Close"],errors="coerce").dropna()
+                    if not close.empty:
+                        prices[ticker]=float(close.iloc[-1])
+                except Exception:
+                    continue
+        except Exception:
+            pass
+    return prices
+
+
 def _holding_table(rows, label):
     if not rows:
         st.info(f"현재 등록된 {label} 보유종목이 없습니다."); return
+    prices=_current_prices(tuple(str(r.get("ticker","")).strip().upper() for r in rows))
     view=[]
     for r in rows:
         avg=float(r.get("average_price",0) or 0); qty=float(r.get("quantity",0) or 0)
-        view.append({"구분":"ETF" if _asset_type(r)=="ETF" else "개별종목","티커":r.get("ticker",""),"종목명":r.get("name",""),"평균매수가($)":round(avg,4),"수량":qty,"투입금액($)":round(avg*qty,2),"손절(-3%)":round(avg*.97,2),"+15%":round(avg*1.15,2),"+20%":round(avg*1.20,2),"+25%":round(avg*1.25,2)})
+        ticker=str(r.get("ticker","")).strip().upper(); current=prices.get(ticker)
+        return_pct=((current/avg)-1)*100 if current is not None and avg>0 else None
+        view.append({"구분":"ETF" if _asset_type(r)=="ETF" else "개별종목","티커":ticker,"종목명":r.get("name",""),
+                     "평균매수가($)":round(avg,4),"현재가($)":round(current,2) if current is not None else "조회 대기",
+                     "수익률(%)":round(return_pct,2) if return_pct is not None else "-",
+                     "수량":qty,"투입금액($)":round(avg*qty,2),"손절(-3%)":round(avg*.97,2),
+                     "+15%":round(avg*1.15,2),"+20%":round(avg*1.20,2),"+25%":round(avg*1.25,2)})
     st.dataframe(pd.DataFrame(view),use_container_width=True,hide_index=True)
 
 
@@ -123,3 +168,4 @@ def install_holdings_tab():
             return containers[:-5]
         return original_tabs(labels,*args,**kwargs)
     st.tabs=wrapped_tabs; st._hy_holdings_tab_installed=True
+
