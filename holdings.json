@@ -22,5 +22,16 @@
     "enabled": false,
     "updated_at": "2026-08-17T02:53:09.421072+00:00",
     "closed_at": "2026-08-17T04:33:17.737465+00:00"
+  },
+  {
+    "ticker": "BKNG",
+    "name": "부킹 홀딩스",
+    "mode": "holding",
+    "status": "holding",
+    "average_price": 210.118,
+    "quantity": 2.0,
+    "stop_loss_pct": 3,
+    "enabled": true,
+    "updated_at": "2026-08-21T18:06:26.618991+00:00"
   }
 ]
