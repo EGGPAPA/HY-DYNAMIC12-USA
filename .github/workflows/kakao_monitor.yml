@@ -5,10 +5,16 @@ on:
     # GitHub cron is UTC.
     # Run broadly enough to cover both EDT and EST.
     # Python checks America/New_York and exits outside 09:30~16:00 ET.
-    - cron: '30-59/15 13 * * 1-5'
-    - cron: '*/15 14-20 * * 1-5'
+    - cron: '30-59/10 13 * * 1-5'
+    - cron: '*/10 14-20 * * 1-5'
     - cron: '0 21 * * 1-5'
   workflow_dispatch:
+    inputs:
+      force_run:
+        description: '미국장 시간이 아니어도 테스트 실행'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -42,17 +48,19 @@ jobs:
           KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
           KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
           APP_URL: https://eggpapa-hy-dynamic12-usa-app-s7ppvp.streamlit.app
+          FORCE_RUN: ${{ inputs.force_run || 'false' }}
         run: python kakao_monitor.py
 
       - name: Save alert state
         run: |
-          if git status --porcelain data/kakao_monitor_state.json | grep -q .; then
+          git add -- data/kakao_monitor_state.json 2>/dev/null || true
+          if ! git diff --cached --quiet; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add data/kakao_monitor_state.json
             git commit -m "Update Kakao monitor alert state"
             git pull --rebase origin main
             git push origin HEAD:main
           else
             echo "No alert state changes"
           fi
+
