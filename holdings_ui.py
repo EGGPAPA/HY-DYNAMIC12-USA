@@ -7,6 +7,8 @@ import pandas as pd
 import requests
 import streamlit as st
 
+from usa_asset_split_ui import render_stock_tab, render_etf_tab, ETF_UNIVERSE
+
 REPO = "EGGPAPA/HY-DYNAMIC12-USA"
 BRANCH = "main"
 HOLDINGS_PATH = "holdings.json"
@@ -72,9 +74,39 @@ def _find(rows, ticker):
     return None, None
 
 
+def _asset_type(row):
+    saved = str(row.get("asset_type", "")).strip().upper()
+    if saved in {"STOCK", "ETF"}:
+        return saved
+    return "ETF" if str(row.get("ticker", "")).strip().upper() in ETF_UNIVERSE else "STOCK"
+
+
+def _holding_table(rows, label):
+    if not rows:
+        st.info(f"현재 등록된 {label} 보유종목이 없습니다.")
+        return
+    view = []
+    for r in rows:
+        avg = float(r.get("average_price", 0) or 0)
+        qty = float(r.get("quantity", 0) or 0)
+        view.append({
+            "구분": "ETF" if _asset_type(r) == "ETF" else "개별종목",
+            "티커": r.get("ticker", ""),
+            "종목명": r.get("name", ""),
+            "평균매수가($)": round(avg, 4),
+            "수량": qty,
+            "투입금액($)": round(avg * qty, 2),
+            "손절(-3%)": round(avg * .97, 2),
+            "+15%": round(avg * 1.15, 2),
+            "+20%": round(avg * 1.20, 2),
+            "+25%": round(avg * 1.25, 2),
+        })
+    st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
+
+
 def render_holdings_tab():
-    st.subheader("💼 보유종목 관리")
-    st.caption("실제 체결 매수가와 수량을 직접 입력합니다. 추가 매수 시 평균매수가를 자동 계산합니다.")
+    st.subheader("💼 미국 보유종목 관리")
+    st.caption("KOR처럼 개별종목과 ETF를 구분해 관리합니다. 추가 매수 시 평균매수가를 자동 계산합니다.")
 
     try:
         rows, sha = _load_holdings()
@@ -82,41 +114,28 @@ def render_holdings_tab():
         st.error(str(e))
         rows, sha = [], None
 
-    active = [
-        x for x in rows
-        if str(x.get("status", "holding")).lower() != "closed" and x.get("enabled", True)
-    ]
+    active = [x for x in rows if str(x.get("status", "holding")).lower() != "closed" and x.get("enabled", True)]
+    stock_holdings = [x for x in active if _asset_type(x) == "STOCK"]
+    etf_holdings = [x for x in active if _asset_type(x) == "ETF"]
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("보유종목", len(active))
-    c2.metric("GitHub 저장", "준비됨" if _github_pat() else "PAT 미설정")
-    c3.metric("카카오 감시", "연결됨")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("전체 보유", len(active))
+    c2.metric("개별종목", len(stock_holdings))
+    c3.metric("ETF", len(etf_holdings))
+    c4.metric("GitHub 저장", "준비됨" if _github_pat() else "PAT 미설정")
 
-    if active:
-        view = []
-        for r in active:
-            avg = float(r.get("average_price", 0) or 0)
-            qty = float(r.get("quantity", 0) or 0)
-            view.append({
-                "티커": r.get("ticker", ""),
-                "종목명": r.get("name", ""),
-                "평균매수가($)": round(avg, 4),
-                "수량": qty,
-                "투입금액($)": round(avg * qty, 2),
-                "손절(-3%)": round(avg * .97, 2),
-                "+15%": round(avg * 1.15, 2),
-                "+20%": round(avg * 1.20, 2),
-                "+25%": round(avg * 1.25, 2),
-            })
-        st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
-    else:
-        st.info("현재 등록된 보유종목이 없습니다.")
+    h1, h2 = st.tabs(["🇺🇸 개별종목 보유", "📊 ETF 보유"])
+    with h1:
+        _holding_table(stock_holdings, "개별종목")
+    with h2:
+        _holding_table(etf_holdings, "ETF")
 
     with st.form("hy_holding_buy_form", clear_on_submit=False):
         st.markdown("#### 매수 등록 / 추가 매수")
-        a, b = st.columns(2)
-        ticker = a.text_input("티커", placeholder="예: NU", key="hy_hold_ticker").strip().upper()
-        name = b.text_input("종목명", placeholder="예: Nu Holdings", key="hy_hold_name").strip()
+        a0, a, b = st.columns([0.8, 1, 2])
+        asset_type = a0.selectbox("구분", ["개별종목", "ETF"], key="hy_hold_asset_type")
+        ticker = a.text_input("티커", placeholder="예: NVDA / QQQ", key="hy_hold_ticker").strip().upper()
+        name = b.text_input("종목명", placeholder="예: NVIDIA / Invesco QQQ", key="hy_hold_name").strip()
         c, d = st.columns(2)
         buy_price = c.number_input("실제 체결 매수가($)", min_value=0.0, step=0.01, format="%.4f", key="hy_hold_price")
         buy_qty = d.number_input("매수 수량", min_value=0.0, step=1.0, format="%.4f", key="hy_hold_qty")
@@ -130,12 +149,14 @@ def render_holdings_tab():
                 rows, sha = _load_holdings()
                 idx, old = _find(rows, ticker)
                 now = datetime.now(timezone.utc).isoformat()
+                kind = "ETF" if asset_type == "ETF" else "STOCK"
                 if old is None:
                     new_avg = float(buy_price)
                     new_qty = float(buy_qty)
                     rows.append({
                         "ticker": ticker,
                         "name": name or ticker,
+                        "asset_type": kind,
                         "mode": "holding",
                         "status": "holding",
                         "average_price": round(new_avg, 6),
@@ -144,7 +165,7 @@ def render_holdings_tab():
                         "enabled": True,
                         "updated_at": now,
                     })
-                    msg = f"Add holding {ticker}"
+                    msg = f"Add {kind} holding {ticker}"
                 else:
                     old_avg = float(old.get("average_price", 0) or 0)
                     old_qty = float(old.get("quantity", 0) or 0)
@@ -152,6 +173,7 @@ def render_holdings_tab():
                     new_avg = ((old_avg * old_qty) + (float(buy_price) * float(buy_qty))) / new_qty
                     old.update({
                         "name": name or old.get("name") or ticker,
+                        "asset_type": kind,
                         "mode": "holding",
                         "status": "holding",
                         "average_price": round(new_avg, 6),
@@ -161,9 +183,9 @@ def render_holdings_tab():
                         "updated_at": now,
                     })
                     rows[idx] = old
-                    msg = f"Update holding {ticker}"
+                    msg = f"Update {kind} holding {ticker}"
                 _save_holdings(rows, sha, msg)
-                st.success(f"{ticker} 저장 완료 · 평균매수가 ${new_avg:.4f} · 총수량 {new_qty:g}")
+                st.success(f"{ticker} 저장 완료 · {asset_type} · 평균매수가 ${new_avg:,.4f} · 총수량 {new_qty:g}")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -191,7 +213,7 @@ def render_holdings_tab():
     else:
         st.caption("전량 매도 처리할 보유종목이 없습니다.")
 
-    st.info("보유종목은 TOP12에서 빠져도 holdings.json에 남고, 미국 정규장 동안 -3%, +15%, +20%, +25%를 계속 감시합니다.")
+    st.info("개별종목과 ETF 모두 TOP12에서 빠져도 holdings.json에 남고, 보유 기준 -3%, +15%, +20%, +25%를 계속 관리할 수 있습니다.")
 
 
 def install_holdings_tab():
@@ -201,6 +223,21 @@ def install_holdings_tab():
 
     def wrapped_tabs(labels, *args, **kwargs):
         labels = list(labels)
+
+        # 메인 USA 앱 탭에는 개별종목 / ETF를 별도 탭으로 추가한다.
+        is_main = "오늘 TOP12" in labels and "미국시장 스캔" in labels
+        if is_main:
+            extra = ["🇺🇸 개별종목", "📊 ETF", "💼 보유종목"]
+            containers = original_tabs(labels + extra, *args, **kwargs)
+            with containers[-3]:
+                render_stock_tab()
+            with containers[-2]:
+                render_etf_tab()
+            with containers[-1]:
+                render_holdings_tab()
+            return containers[:-3]
+
+        # 다른 탭 그룹에는 기존 방식대로 보유종목 탭만 자동 추가한다.
         if "💼 보유종목" in labels:
             return original_tabs(labels, *args, **kwargs)
         containers = original_tabs(labels + ["💼 보유종목"], *args, **kwargs)
