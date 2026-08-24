@@ -846,7 +846,10 @@ with tabs[2]:
                 d=yf_daily(sym); a=analyze(d); lm=leader_metrics(d); fn=score_yf(yf_info_safe(sym)); pdeta={"last":yf_price(sym,d),"source":"yfinance"}
             c1,c2,c3,c4=st.columns(4)
             c1.metric("현재가",pdeta.get("last"));c2.metric("주도주",lm["leader_score"]);c3.metric("기술",a["score"]);c4.metric("재무",fn["fund_score"])
-            st.line_chart(d[["close","ma20","ma60"]].tail(120))
+            chart=d.copy()
+            chart["ma20"]=pd.to_numeric(chart["close"],errors="coerce").rolling(20).mean()
+            chart["ma60"]=pd.to_numeric(chart["close"],errors="coerce").rolling(60).mean()
+            st.line_chart(chart[["close","ma20","ma60"]].tail(120))
             st.write({"entry1":a["entry"],"entry2":a["entry2"],"target15%":a["target"],"ATR%":a["atr_pct"],"gap%":a["gap"],"value_ratio":a["value_ratio"],"near_high":lm["near_high"]})
         except Exception as e: st.error(str(e))
 
