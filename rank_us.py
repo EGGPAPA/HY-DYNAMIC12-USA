@@ -1,5 +1,7 @@
 import pandas as pd
 import yfinance as yf
+import io
+import requests
 
 
 def _num(v):
@@ -33,6 +35,59 @@ YAHOO_UNIVERSE={
     ],
     "AMS":["SPY","QQQ","IWM","DIA","SOXL","TQQQ","ARKK","SMH","XLK","XLE"]
 }
+
+SP500_CSV="https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
+
+
+def _broad_universe():
+    """S&P500 전체와 기존 성장/주도주 후보를 합친 500~650개 유동성 종목군."""
+    names={}
+    exchanges={}
+    try:
+        response=requests.get(SP500_CSV,timeout=20)
+        response.raise_for_status()
+        frame=pd.read_csv(io.StringIO(response.text))
+        for _,row in frame.iterrows():
+            symbol=str(row.get("Symbol","")).strip().upper().replace(".","-")
+            if symbol:
+                names[symbol]=str(row.get("Security") or symbol)
+                exchanges[symbol]="USA"
+    except Exception:
+        pass
+    for exchange,items in YAHOO_UNIVERSE.items():
+        for symbol in items:
+            names.setdefault(symbol,symbol);exchanges.setdefault(symbol,exchange)
+    return names,exchanges
+
+
+def broad_us_candidates(candidate_n=120):
+    """미국 핵심 유동성 종목 500개 이상을 배치 조회해 정밀분석 후보를 압축한다."""
+    names,exchanges=_broad_universe();symbols=list(names);rows=[];errors=[];chunk_size=80
+    for start in range(0,len(symbols),chunk_size):
+        chunk=symbols[start:start+chunk_size]
+        try:
+            data=yf.download(chunk,period="6mo",interval="1d",auto_adjust=False,progress=False,threads=8,group_by="ticker")
+        except Exception as e:
+            errors.append(f"Yahoo broad {start+1}-{start+len(chunk)}: {type(e).__name__}");continue
+        for symbol in chunk:
+            try:
+                daily=data[symbol] if isinstance(data.columns,pd.MultiIndex) else data
+                close=pd.to_numeric(daily["Close"],errors="coerce").dropna();volume=pd.to_numeric(daily["Volume"],errors="coerce").reindex(close.index).dropna()
+                if len(close)<61 or len(volume)<20:continue
+                price=float(close.iloc[-1]);avg_dollar=float((close.tail(20)*volume.tail(20)).mean())
+                if price<3 or avg_dollar<50_000_000:continue
+                r5=(price/float(close.iloc[-6])-1)*100;r20=(price/float(close.iloc[-21])-1)*100;r60=(price/float(close.iloc[-61])-1)*100
+                volume_ratio=float(volume.tail(5).mean()/max(volume.tail(20).mean(),1));near_high=price/float(close.tail(120).max())*100
+                liquidity=min(100,max(0,(__import__('math').log10(max(avg_dollar,1))-7)*35))
+                momentum=min(100,max(0,50+r5*.8+r20*1.5+r60*.35));volume_score=min(100,max(0,50+(volume_ratio-1)*35));high_score=min(100,max(0,near_high))
+                score=round(liquidity*.30+momentum*.35+volume_score*.15+high_score*.20,1)
+                rows.append({"symbol":symbol,"name":names[symbol],"exchange":exchanges[symbol],"sources":"S&P500+성장주/유동성/모멘텀/거래증가/고점","source_count":4,"pre_score":score})
+            except Exception:continue
+    if not rows:
+        fallback,_=_yahoo_candidates(candidate_n)
+        return fallback,["광범위 스캔 실패 · 기존 유동성 후보군으로 대체"]+errors
+    frame=pd.DataFrame(rows).sort_values("pre_score",ascending=False).drop_duplicates("symbol")
+    return frame.head(int(candidate_n)).reset_index(drop=True),errors
 
 
 def _yahoo_candidates(candidate_n=40):
@@ -125,3 +180,4 @@ class USScanner:
                            "source_count":len(src),"pre_score":round(score,1)})
         x=pd.DataFrame(result).sort_values(["pre_score","source_count"],ascending=False)
         return x.head(int(candidate_n)).reset_index(drop=True),errors
+

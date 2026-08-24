@@ -5,7 +5,7 @@ install_holdings_tab()
 import pandas as pd
 from config import settings,save
 from kis_us import KISUS, yf_daily, yf_price, yf_info_safe
-from rank_us import USScanner
+from rank_us import USScanner, broad_us_candidates
 from us_sector_leaders import scan_sector_leaders
 from engine import analyze
 from leader import leader_metrics
@@ -242,7 +242,8 @@ def run_usa_unified_update(cfg,precise,status):
     status.write("⏳ ① 미국시장 데이터 준비 중...")
     if precise:
         if not cfg["key"] or not cfg["secret"]:raise RuntimeError("정밀 전체 업데이트에는 KIS App Key/Secret이 필요합니다.")
-        api=KISUS(cfg);scan=USScanner(api);cand,errs=scan.candidates(40,25)
+        api=KISUS(cfg);scan=USScanner(api);kis_cand,kis_errs=scan.candidates(40,25);broad,broad_errs=broad_us_candidates(120)
+        cand=pd.concat([broad,kis_cand],ignore_index=True).sort_values("pre_score",ascending=False).drop_duplicates("symbol").head(120).reset_index(drop=True);errs=kis_errs+broad_errs
         if cand is None or cand.empty:raise RuntimeError("미국시장 후보를 가져오지 못했습니다.")
         save_json(CAND_FILE,cand.to_dict("records"));st.session_state["us_errors"]=errs
     else:
@@ -251,7 +252,7 @@ def run_usa_unified_update(cfg,precise,status):
         cand=cand.head(25)
     st.session_state["us_candidates"]=cand;status.write(f"✅ ① 시장 후보 {len(cand)}개 준비")
     status.write("⏳ ② 전체시장 후보 정밀분석 중...");bar=st.progress(0)
-    rows,details=analyze_candidate_frame(cand,progress=bar,message=status);bar.empty()
+    rows,details=analyze_candidate_frame(cand,limit=80 if precise else 25,progress=bar,message=status);bar.empty()
     if not rows:raise RuntimeError("정밀분석 정상 결과가 없습니다.")
     st.session_state["us_ranked"]=rows;st.session_state["us_details"]=details;save_json(TOP12_FILE,rows[:12]);save_kakao_watchlist(rows[:12])
     status.write(f"✅ ② 전체시장 분석 완료 · {len(rows)}개");status.write("✅ ③ USA TOP12 선정 완료");status.write("✅ ④ 부의 점프 계산 완료 · 주도주/기술/재무/거래강도 통합")
