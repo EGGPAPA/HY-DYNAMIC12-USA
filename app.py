@@ -540,6 +540,39 @@ def render_usa_leader_entry_panel():
             st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
 
 
+def render_usa_integrated_buy_panel(top):
+    st.subheader("🎯 USA 통합 매수판정")
+    st.caption("USA TOP12 · 부의 점프 · 월봉 5개월선 · 주도업종을 교차 확인합니다. 주도업종 4조건 충족만으로는 매수하지 않습니다.")
+    if not top:
+        st.info("USA TOP12가 없습니다. 먼저 정밀 전체 업데이트를 실행하세요.");return
+    try:sectors=usa_leader_entry_conditions()
+    except Exception:sectors=[]
+    sector_map={x["ticker"]:{"ready":bool(x.get("ready")),"sector":x.get("sector",s.get("sector","-"))} for s in sectors for x in s.get("representatives",[])}
+    ma_rows=st.session_state.get("monthly_ma5_rows",[])
+    ma_map={str(x.get("티커","")):x for x in ma_rows}
+    results=[]
+    for row in top[:12]:
+        ticker=str(row.get("티커",""));score=float(row.get("USA점수",0) or 0);leader=float(row.get("주도주",0) or 0);technical=float(row.get("기술",0) or 0);fundamental=float(row.get("재무",0) or 0)
+        top_ok=True
+        wealth_ok=score>=75 and leader>=70 and technical>=55 and fundamental>=50
+        ma=ma_map.get(ticker,{});ma_ok=bool(ma) and ma.get("판정")!="⚪ 제외" and float(ma.get("돌파율(%)",-999) or -999)>0
+        sector=sector_map.get(ticker,{});sector_ok=bool(sector.get("ready"))
+        count=sum((top_ok,wealth_ok,ma_ok,sector_ok))
+        if count==4:decision="🟢 적극매수 검토";action="1차 20~30% 분할매수"
+        elif count==3 and (top_ok or wealth_ok):decision="🟢 1차매수 검토";action="1차 10~20% · 눌림 확인"
+        elif count==2:decision="🟡 관찰·눌림대기";action="신호 1개 추가 확인"
+        else:decision="⚪ 매수보류";action="단독 신호로 매수 금지"
+        results.append({"종합순위":0,"종목":row.get("종목"),"티커":ticker,"현재가($)":row.get("현재가($)"),"TOP12":"✅" if top_ok else "-","부의점프":"✅" if wealth_ok else "대기","5개월선":"✅" if ma_ok else "대기","주도업종":"✅" if sector_ok else "대기","교차포착":f"{count}/4","통합판정":decision,"행동":action,"1차매수가($)":row.get("1차매수가($)"),"2차매수가($)":row.get("2차매수가($)"),"업종":sector.get("sector","-")})
+    results.sort(key=lambda x:(int(x["교차포착"].split("/")[0]),float(next((r.get("USA점수",0) for r in top if r.get("티커")==x["티커"]),0) or 0)),reverse=True)
+    for i,row in enumerate(results,1):row["종합순위"]=i
+    buy=[x for x in results if x["통합판정"].startswith("🟢")]
+    a,b,c,d=st.columns(4);a.metric("4/4 강한포착",sum(x["교차포착"]=="4/4" for x in results));b.metric("3/4 후보",sum(x["교차포착"]=="3/4" for x in results));c.metric("오늘 매수검토",len(buy));d.metric("단독 업종신호","매수 금지")
+    if buy:st.success("오늘 통합 매수검토: "+", ".join(f"{x['티커']}({x['교차포착']})" for x in buy[:4]))
+    else:st.info("현재 3개 이상 교차 포착된 종목이 없습니다. 현금 대기하고 신호가 겹칠 때까지 기다립니다.")
+    st.dataframe(pd.DataFrame(results),use_container_width=True,hide_index=True)
+    if not ma_rows:st.warning("5개월선 결과가 없습니다. 빠른 또는 정밀 전체 업데이트를 실행해야 완전한 통합판정이 가능합니다.")
+
+
 tabs=st.tabs(["🏆 USA TOP12","🔎 전체시장 분석","🚀 부의 점프·상세","💰 자금관리","⚙️ KIS 설정","🔔 카카오","📋 전략 규칙","🔥 5개월선 돌파","📈 전략검증"])
 
 with tabs[4]:
@@ -822,6 +855,7 @@ with tabs[0]:
         st.subheader("🏆 USA TOP12 핵심표")
         render_usa_top12_blink(top)
         render_usa_leader_entry_panel()
+        render_usa_integrated_buy_panel(top)
 
         _precision_errors=st.session_state.get("us_precision_errors",[])
         if _precision_errors:
