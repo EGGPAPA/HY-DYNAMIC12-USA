@@ -16,6 +16,10 @@ import json
 import os
 import requests
 import html
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from monthly_breakout_ui import render_monthly_breakout_tab, scan_monthly_breakouts
+from usa_backtest_ui import render_usa_backtest_tab
 
 STATE_DIR=Path("data")
 STATE_DIR.mkdir(exist_ok=True)
@@ -192,6 +196,69 @@ def usa_exit_plan(entry, current):
         return {"return_pct":0.0,"stage":"계산불가","action":"확인 필요"}
 
 
+SEOUL=ZoneInfo("Asia/Seoul")
+NEW_YORK=ZoneInfo("America/New_York")
+
+
+@st.cache_data(ttl=86400,show_spinner=False)
+def cached_yf_info(symbol):
+    return yf_info_safe(symbol)
+
+
+@st.cache_data(ttl=900,show_spinner=False)
+def usa_market_snapshot():
+    out=[]
+    for ticker,name in [("^GSPC","S&P500"),("^IXIC","NASDAQ"),("^VIX","VIX")]:
+        try:
+            d=yf_daily(ticker);close=pd.to_numeric(d["close"],errors="coerce").dropna()
+            if len(close)>=2:out.append({"name":name,"price":float(close.iloc[-1]),"change":(float(close.iloc[-1])/float(close.iloc[-2])-1)*100})
+        except Exception:pass
+    return out
+
+
+def analyze_candidate_frame(cand,limit=None,progress=None,message=None):
+    if cand is None or cand.empty:return [],{}
+    work=cand.head(min(int(limit or len(cand)),len(cand)));rows=[];details={};errors=[];recs=work.to_dict("records")
+    for i,r in enumerate(recs):
+        sym=r["symbol"];excd=r["exchange"]
+        if message is not None:message.write(f"⏳ {i+1}/{len(recs)} · {sym} 정밀분석")
+        try:
+            d=yf_daily(sym);a=analyze(d);lm=leader_metrics(d);px=yf_price(sym,d);pdeta={"last":px,"source":"yfinance"};fn=score_yf(cached_yf_info(sym))
+            final=round(lm["leader_score"]*.35+a["score"]*.25+r["pre_score"]*.15+min(100,a["value_ratio"]*50)*.10+fn["fund_score"]*.15,1)
+            signal="적극매수" if final>=85 else ("매수후보" if final>=75 else ("관찰" if final>=65 else "현금대기"))
+            if lm["near_high"]>=98 and a["gap"]>6:signal="관찰"
+            px=float(pdeta.get("last",d.iloc[-1].close) or d.iloc[-1].close);avg=round((a["entry"]+a["entry2"])/2,2)
+            rows.append({"순위":0,"종목":r["name"],"티커":sym,"거래소":excd,"포착경로":r["sources"],"현재가($)":round(px,2),"USA점수":final,"주도주":lm["leader_score"],"기술":a["score"],"재무":fn["fund_score"],"20일RS(%)":lm["rs20"],"60일RS(%)":lm["rs60"],"120일고점대비(%)":lm["near_high"],"거래대금배수":a["value_ratio"],"재무판정":fn["status"],"ROE(%)":fn["roe"],"매출성장(%)":fn["revenue_growth"],"Forward PER":fn["forward_pe"],"판정":f"{signal} ({final:.1f}점)","판정점수":final,"1차매수가($)":a["entry"],"2차매수가($)":a["entry2"],"평균매수가($)":avg,"3%손절가($)":round(avg*.97,2),"+15%목표($)":a["target"],"+20%목표($)":round(a["entry"]*1.20,2),"+25%목표($)":round(a["entry"]*1.25,2),"ATR(%)":a["atr_pct"]})
+            details[sym]=(d,a,lm,fn,pdeta)
+        except Exception as e:errors.append(f"{sym}: {str(e)[:300]}")
+        if progress is not None:progress.progress((i+1)/max(1,len(recs)))
+    rows.sort(key=lambda x:x["USA점수"],reverse=True)
+    for n,r in enumerate(rows,1):r["순위"]=n
+    st.session_state["us_precision_errors"]=errors
+    return rows,details
+
+
+def run_usa_unified_update(cfg,precise,status):
+    status.write("⏳ ① 미국시장 데이터 준비 중...")
+    if precise:
+        if not cfg["key"] or not cfg["secret"]:raise RuntimeError("정밀 전체 업데이트에는 KIS App Key/Secret이 필요합니다.")
+        api=KISUS(cfg);scan=USScanner(api);cand,errs=scan.candidates(40,25)
+        if cand is None or cand.empty:raise RuntimeError("미국시장 후보를 가져오지 못했습니다.")
+        save_json(CAND_FILE,cand.to_dict("records"));st.session_state["us_errors"]=errs
+    else:
+        saved=load_json(CAND_FILE,[]);cand=pd.DataFrame(saved) if saved else None
+        if cand is None or cand.empty:raise RuntimeError("저장된 후보가 없습니다. 먼저 정밀 전체 업데이트를 실행하세요.")
+        cand=cand.head(25)
+    st.session_state["us_candidates"]=cand;status.write(f"✅ ① 시장 후보 {len(cand)}개 준비")
+    status.write("⏳ ② 전체시장 후보 정밀분석 중...");bar=st.progress(0)
+    rows,details=analyze_candidate_frame(cand,progress=bar,message=status);bar.empty()
+    if not rows:raise RuntimeError("정밀분석 정상 결과가 없습니다.")
+    st.session_state["us_ranked"]=rows;st.session_state["us_details"]=details;save_json(TOP12_FILE,rows[:12]);save_kakao_watchlist(rows[:12])
+    status.write(f"✅ ② 전체시장 분석 완료 · {len(rows)}개");status.write("✅ ③ USA TOP12 선정 완료");status.write("✅ ④ 부의 점프 계산 완료 · 주도주/기술/재무/거래강도 통합")
+    status.write("⏳ ⑤ 5개월선 돌파 분석 중...");ma5=scan_monthly_breakouts(include_etf=True,only_new=False);st.session_state["monthly_ma5_rows"]=ma5;status.write(f"✅ ⑤ 5개월선 분석 완료 · {len(ma5)}개")
+    completed=datetime.now(SEOUL).strftime("%Y-%m-%d %H:%M:%S KST");st.session_state["usa_full_update_at"]=completed;st.session_state["usa_update_mode"]="정밀 전체" if precise else "빠른";status.write("✅ ⑥ 저장 및 화면 갱신 완료");return completed
+
+
 st.set_page_config(page_title="HY DYNAMIC12 USA V2.2 BLINK",page_icon="🇺🇸",layout="wide")
 
 st.markdown("""
@@ -308,8 +375,26 @@ div[data-testid="stDataFrame"] {font-size: 0.88rem;}
 </style>
 """, unsafe_allow_html=True)
 st.title("HY DYNAMIC12 USA V2.3 · BLINK + KAKAO")
-st.caption("NASDAQ · NYSE · AMEX → 거래대금/시총/거래증가/신고가 → 주도주 정밀분석 → 오늘의 USA TOP12")
+st.caption("KR과 동일한 흐름: 미국시장 → TOP12 → 부의 점프 → 5개월선 → 보유종목 · 미국 수급은 거래대금/상대강도/시총 모멘텀으로 대체")
 s=settings()
+
+snap=usa_market_snapshot()
+if snap:
+    cols=st.columns(len(snap)+1)
+    for col,x in zip(cols,snap):col.metric(x["name"],f"{x['price']:,.2f}",f"{x['change']:+.2f}%")
+    cols[-1].metric("미국 동부시간",datetime.now(NEW_YORK).strftime("%m-%d %H:%M"))
+fast_col,full_col=st.columns([2,1])
+if fast_col.button("⚡ USA 빠른 업데이트",type="primary",use_container_width=True,key="usa_fast_all"):
+    status=st.status("USA 빠른 업데이트 실행 중",expanded=True)
+    try:
+        done=run_usa_unified_update(s,False,status);status.update(label=f"⚡ 빠른 업데이트 완료 · {done}",state="complete",expanded=True);st.success("저장 후보의 최신 가격과 판정을 갱신했습니다.")
+    except Exception as e:status.update(label="빠른 업데이트 오류",state="error",expanded=True);st.error(str(e))
+if full_col.button("🚀 USA 정밀 전체 업데이트",use_container_width=True,key="usa_precise_all"):
+    status=st.status("USA 정밀 전체 업데이트 실행 중",expanded=True)
+    try:
+        done=run_usa_unified_update(s,True,status);status.update(label=f"🎉 정밀 전체 업데이트 완료 · {done}",state="complete",expanded=True);st.success("신규 후보 탐색부터 TOP12까지 완료했습니다.")
+    except Exception as e:status.update(label="정밀 전체 업데이트 오류",state="error",expanded=True);st.error(str(e))
+if st.session_state.get("usa_full_update_at"):st.caption(f"마지막 업데이트: **{st.session_state['usa_full_update_at']}** · {st.session_state.get('usa_update_mode','-')}")
 
 
 def render_usa_top12_blink(top):
@@ -455,7 +540,7 @@ def render_usa_leader_entry_panel():
             st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
 
 
-tabs=st.tabs(["오늘 TOP12","미국시장 스캔","상세","자금관리","KIS 설정","🔔 카카오","전략 규칙"])
+tabs=st.tabs(["🏆 USA TOP12","🔎 전체시장 분석","🚀 부의 점프·상세","💰 자금관리","⚙️ KIS 설정","🔔 카카오","📋 전략 규칙","🔥 5개월선 돌파","📈 전략검증"])
 
 with tabs[4]:
     st.subheader("KIS 설정")
@@ -852,4 +937,10 @@ with tabs[6]:
 - 카카오: 새 적극매수 종목 발생 시 1회 알림, GitHub Actions 장중 모니터와 watchlist 연동
 - 주도주 자동알림: 1차 관찰가 ±2% + 20일선 위 + 거래량 0.7배 이상 + 추세 무효선 위를 모두 충족할 때 발송
 """)
+
+with tabs[7]:
+    render_monthly_breakout_tab()
+
+with tabs[8]:
+    render_usa_backtest_tab()
 
