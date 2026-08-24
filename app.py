@@ -5,7 +5,13 @@ install_holdings_tab()
 import pandas as pd
 from config import settings,save
 from kis_us import KISUS, yf_daily, yf_price, yf_info_safe
-from rank_us import USScanner, broad_us_candidates
+from rank_us import USScanner
+try:
+    from rank_us import broad_us_candidates
+except ImportError:
+    # Streamlit Cloud가 배포 직후 이전 rank_us 모듈을 잠시 캐시해도 앱 시작은 유지한다.
+    def broad_us_candidates(candidate_n=120):
+        return pd.DataFrame(), ["광범위 스캔 모듈 갱신 대기 · 이번 실행은 KIS 후보만 사용"]
 from us_sector_leaders import scan_sector_leaders
 from engine import analyze
 from leader import leader_metrics
