@@ -838,19 +838,29 @@ with tabs[2]:
     else:
         sym=st.selectbox("종목",[x["티커"] for x in rows[:12]])
         r=next(x for x in rows if x["티커"]==sym)
-        st.json(r)
+        summary_fields=[("종목",r.get("종목")),("티커",r.get("티커")),("거래소",r.get("거래소")),("판정",r.get("판정")),("USA점수",r.get("USA점수")),("20일 상대강도",r.get("20일RS(%)")),("60일 상대강도",r.get("60일RS(%)")),("120일 고점대비",r.get("120일고점대비(%)")),("거래대금배수",r.get("거래대금배수")),("재무판정",r.get("재무판정"))]
+        st.dataframe(pd.DataFrame(summary_fields,columns=["핵심항목","현재값"]),use_container_width=True,hide_index=True)
         try:
             if sym in st.session_state.get("us_details",{}):
                 d,a,lm,fn,pdeta=st.session_state["us_details"][sym]
             else:
                 d=yf_daily(sym); a=analyze(d); lm=leader_metrics(d); fn=score_yf(yf_info_safe(sym)); pdeta={"last":yf_price(sym,d),"source":"yfinance"}
             c1,c2,c3,c4=st.columns(4)
-            c1.metric("현재가",pdeta.get("last"));c2.metric("주도주",lm["leader_score"]);c3.metric("기술",a["score"]);c4.metric("재무",fn["fund_score"])
+            c1.metric("현재가",f"${float(pdeta.get('last',0)):,.2f}");c2.metric("주도주",lm["leader_score"]);c3.metric("기술",a["score"]);c4.metric("재무",fn["fund_score"])
             chart=d.copy()
             chart["ma20"]=pd.to_numeric(chart["close"],errors="coerce").rolling(20).mean()
             chart["ma60"]=pd.to_numeric(chart["close"],errors="coerce").rolling(60).mean()
+            if "date" in chart.columns:
+                chart["date"]=pd.to_datetime(chart["date"],errors="coerce")
+                chart=chart.dropna(subset=["date"]).set_index("date")
+            chart.index.name="날짜"
             st.line_chart(chart[["close","ma20","ma60"]].tail(120))
-            st.write({"entry1":a["entry"],"entry2":a["entry2"],"target15%":a["target"],"ATR%":a["atr_pct"],"gap%":a["gap"],"value_ratio":a["value_ratio"],"near_high":lm["near_high"]})
+            st.markdown("#### 매매계획과 위험지표")
+            plan_rows=[("1차 매수가",f"${a['entry']:,.2f}"),("2차 매수가",f"${a['entry2']:,.2f}"),("+15% 목표가",f"${a['target']:,.2f}"),("ATR",f"{a['atr_pct']:.2f}%"),("이동평균 이격",f"{a['gap']:.2f}%"),("거래대금 배수",f"{a['value_ratio']:.2f}배"),("120일 고점 대비",f"{lm['near_high']:.1f}%")]
+            st.dataframe(pd.DataFrame(plan_rows,columns=["항목","기준값"]),use_container_width=True,hide_index=True)
+            if lm["near_high"]>=98 and a["gap"]>6:st.warning("고점권이면서 이동평균선 이격이 큽니다. 현재가 추격보다 1·2차 매수가 구간의 눌림을 기다리세요.")
+            elif a["gap"]>6:st.info("이동평균선 이격 부담이 있어 분할매수 구간까지 기다리는 편이 안전합니다.")
+            else:st.success("이격이 과도하지 않습니다. 판정점수와 1·2차 매수가를 함께 확인하세요.")
         except Exception as e: st.error(str(e))
 
 with tabs[3]:
