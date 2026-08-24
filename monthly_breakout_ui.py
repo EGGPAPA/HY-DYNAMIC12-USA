@@ -87,6 +87,19 @@ def _scan_one(ticker, name):
             "돌파점수": strength, "판정": judge, "_crossed": crossed}
 
 
+def scan_monthly_breakouts(include_etf=True, only_new=False, progress=None, status=None):
+    rows=[];items=list(_universe(include_etf).items())
+    for i,(ticker,name) in enumerate(items):
+        if status is not None:status.caption(f"{i+1}/{len(items)} · {ticker} 월봉 확인")
+        try:
+            row=_scan_one(ticker,name)
+            if row and (not only_new or row["_crossed"]):rows.append(row)
+        except Exception:pass
+        if progress is not None:progress.progress((i+1)/max(1,len(items)))
+    rows.sort(key=lambda x:(x["_crossed"],x["돌파점수"],x["돌파율(%)"]),reverse=True)
+    return rows
+
+
 def render_monthly_breakout_tab():
     st.subheader("🔥 월봉 5개월 이동평균선 돌파")
     st.caption("월봉 5개월선 신규 돌파 + 조정기간 + 이동평균선 방향 + 거래량을 함께 확인합니다. 진행 중인 월봉은 월말 확정 전 신호가 바뀔 수 있습니다.")
@@ -97,17 +110,8 @@ def render_monthly_breakout_tab():
     names = _universe(include_etf)
     st.info(f"현재 스캔 대상 {len(names)}개 · 미국시장 후보/TOP12" + (" + 주요 ETF" if include_etf else ""))
     if st.button("🔎 월봉 5개월선 돌파 스캔", type="primary", use_container_width=True, key="ma5_scan"):
-        rows=[]; bar=st.progress(0); status=st.empty()
-        items=list(names.items())
-        for i,(t,n) in enumerate(items):
-            status.caption(f"{i+1}/{len(items)} · {t} 월봉 확인")
-            try:
-                r=_scan_one(t,n)
-                if r: rows.append(r)
-            except Exception:
-                pass
-            bar.progress((i+1)/max(1,len(items)))
-        rows.sort(key=lambda x:(x["_crossed"],x["돌파점수"],x["돌파율(%)"]), reverse=True)
+        bar=st.progress(0); status=st.empty()
+        rows=scan_monthly_breakouts(include_etf,False,bar,status)
         st.session_state["monthly_ma5_rows"]=rows
         bar.empty(); status.empty()
 
@@ -124,3 +128,4 @@ def render_monthly_breakout_tab():
         else:
             st.warning("현재 조건에 맞는 신규 돌파 종목이 없습니다.")
         st.caption("※ 월중 신호는 잠정 신호입니다. 월말 종가가 5개월 이동평균선 위에서 확정되는지 다시 확인하세요.")
+
