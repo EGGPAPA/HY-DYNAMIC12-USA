@@ -127,7 +127,21 @@ def _holding_table(rows, label):
 
     styled = (
         table.style
-        .format({"수익률(%)": lambda value: "-" if pd.isna(value) else f"{float(value):+.2f}"}, escape="html")
+        .format(
+            {
+                "평균매수가($)": lambda value: f"{float(value):,.2f}",
+                "현재가($)": lambda value: value if isinstance(value, str) else f"{float(value):,.2f}",
+                "수익률(%)": lambda value: f"{float(value):+.2f}",
+                "수량": lambda value: f"{float(value):g}",
+                "투입금액($)": lambda value: f"{float(value):,.2f}",
+                "손절(-3%)": lambda value: f"{float(value):,.2f}",
+                "+15%": lambda value: f"{float(value):,.2f}",
+                "+20%": lambda value: f"{float(value):,.2f}",
+                "+25%": lambda value: f"{float(value):,.2f}",
+            },
+            na_rep="-",
+            escape="html",
+        )
         .map(return_color, subset=["수익률(%)"])
         .set_properties(**{"font-size": "16px", "padding": "10px 12px"})
         .set_table_styles([
