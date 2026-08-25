@@ -112,10 +112,35 @@ def _holding_table(rows, label):
         return_pct=((current/avg)-1)*100 if current is not None and avg>0 else None
         view.append({"구분":"ETF" if _asset_type(r)=="ETF" else "개별종목","티커":ticker,"종목명":r.get("name",""),
                      "평균매수가($)":round(avg,4),"현재가($)":round(current,2) if current is not None else "조회 대기",
-                     "수익률(%)":round(return_pct,2) if return_pct is not None else "-",
+                     "수익률(%)":round(return_pct,2) if return_pct is not None else None,
                      "수량":qty,"투입금액($)":round(avg*qty,2),"손절(-3%)":round(avg*.97,2),
                      "+15%":round(avg*1.15,2),"+20%":round(avg*1.20,2),"+25%":round(avg*1.25,2)})
-    st.dataframe(pd.DataFrame(view),use_container_width=True,hide_index=True)
+    table = pd.DataFrame(view)
+    def return_color(value):
+        if pd.isna(value):
+            return "color: #a0a8b8; font-weight: 700"
+        if float(value) > 0:
+            return "color: #ff4b4b; font-weight: 800"
+        if float(value) < 0:
+            return "color: #4da3ff; font-weight: 800"
+        return "color: #f0f2f6; font-weight: 700"
+
+    styled = (
+        table.style
+        .format({"수익률(%)": lambda value: "-" if pd.isna(value) else f"{float(value):+.2f}"}, escape="html")
+        .applymap(return_color, subset=["수익률(%)"])
+        .set_properties(**{"font-size": "16px", "padding": "10px 12px"})
+        .set_table_styles([
+            {"selector": "table", "props": [("width", "100%"), ("border-collapse", "collapse")]},
+            {"selector": "th", "props": [("font-size", "16px"), ("font-weight", "800"), ("padding", "11px 12px"), ("text-align", "left")]},
+            {"selector": "td", "props": [("font-size", "16px"), ("font-weight", "600"), ("white-space", "nowrap")]},
+        ])
+        .hide(axis="index")
+    )
+    st.markdown(
+        f'<div style="width:100%;overflow-x:auto">{styled.to_html()}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def render_holdings_tab():
