@@ -146,7 +146,7 @@ if active:
             {"수익률(%)": lambda value: "-" if pd.isna(value) else f"{float(value):+.2f}"},
             escape="html",
         )
-        .applymap(return_color, subset=["수익률(%)"])
+        .map(return_color, subset=["수익률(%)"])
         .set_properties(**{"font-size": "16px", "padding": "10px 12px"})
         .set_table_styles([
             {"selector": "table", "props": [("width", "100%"), ("border-collapse", "collapse")]},
