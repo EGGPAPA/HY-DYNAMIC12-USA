@@ -64,7 +64,7 @@ def _asset_type(row):
     return "ETF" if str(row.get("ticker", "")).strip().upper() in ETF_UNIVERSE else "STOCK"
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=10, show_spinner=False)
 def _current_prices(tickers):
     symbols=[str(x).strip().upper() for x in tickers if str(x).strip()]
     if not symbols:
@@ -101,6 +101,7 @@ def _current_prices(tickers):
     return prices
 
 
+@st.fragment(run_every="10s")
 def _holding_table(rows, label):
     if not rows:
         st.info(f"현재 등록된 {label} 보유종목이 없습니다."); return
