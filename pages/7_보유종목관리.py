@@ -15,6 +15,47 @@ GITHUB_API = f"https://api.github.com/repos/{REPO}/contents/{HOLDINGS_PATH}"
 GITHUB_PAT = os.getenv("GITHUB_PAT", "").strip()
 
 st.set_page_config(page_title="보유종목 관리", page_icon="💼", layout="wide")
+
+@st.cache_data(ttl=900,show_spinner=False)
+def get_holding_assessment(ticker):
+    try:
+        obj=yf.Ticker(str(ticker).strip().upper())
+        hist=obj.history(period="1y",interval="1d",auto_adjust=False)
+        close=pd.to_numeric(hist.get("Close"),errors="coerce").dropna()
+        if len(close)<160:return None
+        price=float(close.iloc[-1]);ma20=float(close.tail(20).mean());ma40=float(close.tail(40).mean())
+        ma60=float(close.tail(60).mean());ma120=float(close.tail(120).mean());ma160=float(close.tail(160).mean())
+        ret20=(price/float(close.iloc[-21])-1)*100 if len(close)>21 else 0
+        technical=sum([20 if price>ma20 else 0,20 if ma20>ma60 else 0,20 if price>ma120 else 0,20 if ret20>0 else 0,20 if price>ma160 else 0])
+        try:info=obj.info or {}
+        except Exception:info={}
+        checks=[]
+        for value,ok in [(info.get("revenueGrowth"),lambda x:x>0),(info.get("earningsGrowth"),lambda x:x>0),(info.get("returnOnEquity"),lambda x:x>0),(info.get("debtToEquity"),lambda x:x<150),(info.get("forwardPE"),lambda x:0<x<50)]:
+            if value is not None:
+                try:checks.append(bool(ok(float(value))))
+                except Exception:pass
+        fundamental=(sum(checks)/len(checks)*100) if checks else 50
+        total=round(technical*.65+fundamental*.35,1)
+        hold="🟢 계속 보유" if total>=70 else ("🟡 보유·점검" if total>=50 else "🟠 비중축소 검토")
+        gap40=(price/ma40-1)*100 if ma40 else 0
+        buy="🟢 1차 분할매수 검토" if total>=65 and -5<=gap40<=5 else ("🟡 눌림 매수 대기" if total>=50 and gap40>5 else "🟠 추세 회복 대기")
+        return {"price":price,"ma20":ma20,"ma40":ma40,"ma60":ma60,"ma120":ma120,"ma160":ma160,"ret20":ret20,"technical":technical,"fundamental":fundamental,"total":total,"hold":hold,"buy":buy,"gap40":gap40,"fundamental_count":len(checks)}
+    except Exception:return None
+
+def render_holding_assessment(row,current_price=None):
+    ticker=str(row.get("ticker","")).strip().upper();name=str(row.get("name") or ticker);a=get_holding_assessment(ticker)
+    st.markdown(f"### 🧠 {name} 종합판단")
+    if not a:
+        st.warning("종합판단에 필요한 160거래일 가격 데이터가 부족하거나 조회하지 못했습니다.");return
+    price=float(current_price) if current_price is not None else a["price"]
+    c1,c2,c3=st.columns(3);c1.metric("통합점수",f'{a["total"]:.1f}점');c2.metric("① 보유 판단",a["hold"]);c3.metric("② 신규·추가매수",a["buy"])
+    st.info(f'현재가 $ {price:,.2f} · 40일선 대비 {a["gap40"]:+.1f}% · 20일 수익률 {a["ret20"]:+.1f}%')
+    st.markdown("#### 🎯 실전 가격 가이드")
+    g1,g2,g3,g4=st.columns(4);g1.metric("1차 분할 참고",f'$ {a["ma40"]:,.2f}');g2.metric("2차 분할 참고",f'$ {a["ma60"]:,.2f}');g3.metric("추세 회복 확인선",f'$ {a["ma20"]:,.2f}');g4.metric("비중축소 경계선",f'$ {a["ma160"]:,.2f}')
+    factors=pd.DataFrame([{"평가항목":"기술·추세","비중":"65%","점수":a["technical"]},{"평가항목":"기업지표","비중":"35%","점수":a["fundamental"]}])
+    st.dataframe(factors,use_container_width=True,hide_index=True,column_config={"점수":st.column_config.ProgressColumn(min_value=0,max_value=100,format="%.1f")})
+    if not a["fundamental_count"]:st.caption("기업지표를 받지 못해 중립 50점으로 계산했습니다.")
+    st.caption("가격선은 자동 계산 참고값입니다. 실적 발표·갭 변동·환율과 포트폴리오 비중을 함께 확인하세요.")
 @st.fragment(run_every="10s")
 def render_live_holdings_page():
     st.title("💼 보유종목 관리")
@@ -172,6 +213,10 @@ def render_live_holdings_page():
             f'<div style="width:100%;overflow-x:auto">{styled.to_html()}</div>',
             unsafe_allow_html=True,
         )
+        st.markdown("#### 🔎 평가할 보유종목")
+        assessment_ticker=st.selectbox("종목 선택",[str(r.get("ticker","")).strip().upper() for r in active],format_func=lambda t:next((f"{r.get('name') or t} ({t})" for r in active if str(r.get("ticker","")).strip().upper()==t),t),key="usa_holding_assessment_ticker")
+        assessment_row=next(r for r in active if str(r.get("ticker","")).strip().upper()==assessment_ticker)
+        render_holding_assessment(assessment_row,prices.get(assessment_ticker))
     else:
         st.info("현재 등록된 보유종목이 없습니다.")
     
