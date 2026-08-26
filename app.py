@@ -487,7 +487,12 @@ def render_usa_top12_blink(top):
 @st.cache_data(ttl=600, show_spinner=False)
 def usa_leader_entry_conditions(cache_version="sector-duration-v2"):
     """강한 업종을 먼저 찾고 업종별 대표 주도주 2~3개를 반환합니다."""
-    return scan_sector_leaders(max_sectors=5,representatives=3)
+    sectors=scan_sector_leaders(max_sectors=5,representatives=3)
+    for sector in sectors:
+        confirmed=sector.get("evaluation")=="🟢 주도업종"
+        for row in sector.get("representatives",[]):
+            row["technical_ready"]=bool(row.get("ready"));row["ready"]=bool(row.get("ready")) and confirmed
+    return sectors
 
 
 @st.cache_data(ttl=10,show_spinner=False)
@@ -534,14 +539,14 @@ def render_usa_leader_entry_panel():
     st.dataframe(result[["최종 매수판정","종목","업종","업종 평가","충족 수","현재가($)","1차 관찰가($)","2차 관찰가($)","추세 무효선($)","20일 수익률(%)","60일 수익률(%)"]],use_container_width=True,hide_index=True)
     st.markdown("#### 매수조건 확인");st.dataframe(result[["종목","현재가($)","1차 관찰가($)","관찰가 ±2%","20일선 위","거래량 ≥0.7배","무효선 위","최종 매수판정"]],use_container_width=True,hide_index=True)
     ready=result[result["최종 매수판정"].eq("🚨 최종 매수조건 충족")].copy();st.markdown("#### 카카오 최종 매수조건 알림")
-    k1,k2,k3=st.columns([1,1,1.4]);k1.metric("카카오 연결","✅ 준비됨" if kakao_ready() else "⚠️ 설정 필요");k2.metric("현재 최종 신호",f"{len(ready)}종목")
-    auto=k3.toggle("조건 신규충족 시 자동알림",value=True,disabled=not kakao_ready(),key="usa_sector_kakao_auto")
+    k1,k2,k3=st.columns([1,1,1.4]);k1.metric("카카오 연결","✅ 준비됨" if bool(KAKAO_REST_API_KEY and KAKAO_REFRESH_TOKEN) else "⚠️ 설정 필요");k2.metric("현재 최종 신호",f"{len(ready)}종목")
+    auto=k3.toggle("조건 신규충족 시 자동알림",value=True,disabled=not bool(KAKAO_REST_API_KEY and KAKAO_REFRESH_TOKEN),key="usa_sector_kakao_auto")
     message="[HY DYNAMIC12 USA 최종 매수조건]\n"+("\n".join(f"{r['종목']} · {r['업종']} · 현재 $ {r['현재가($)']:,.2f} · 관찰 $ {r['1차 관찰가($)']:,.2f}" for _,r in ready.iterrows()) if not ready.empty else "현재 충족 종목 없음")
-    if st.button("📨 현재 최종 신호 카카오 알림 보내기",disabled=not kakao_ready() or ready.empty,use_container_width=True,key="usa_sector_kakao_manual"):
+    if st.button("📨 현재 최종 신호 카카오 알림 보내기",disabled=not bool(KAKAO_REST_API_KEY and KAKAO_REFRESH_TOKEN) or ready.empty,use_container_width=True,key="usa_sector_kakao_manual"):
         try:kakao_send_to_me(message);st.success("카카오 알림을 보냈습니다.")
         except Exception as e:st.error(str(e))
     signature="|".join(sorted(ready["종목"].astype(str))) if not ready.empty else ""
-    if auto and kakao_ready() and signature and st.session_state.get("usa_sector_alert_signature")!=signature:
+    if auto and bool(KAKAO_REST_API_KEY and KAKAO_REFRESH_TOKEN) and signature and st.session_state.get("usa_sector_alert_signature")!=signature:
         try:kakao_send_to_me(message);st.session_state["usa_sector_alert_signature"]=signature;st.success("새 최종 매수조건 종목을 카카오로 보냈습니다.")
         except Exception as e:st.warning(str(e))
     st.caption("업종 단계는 20·60일 흐름과 상승 확산을 반영합니다. 자동알림은 앱이 열려 있는 동안 작동합니다.")
