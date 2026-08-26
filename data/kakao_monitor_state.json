@@ -2,12 +2,10 @@
   "NU_entry1": false,
   "_updated_at": "2026-08-16T07:52:34.004589+00:00",
   "candidate:NU:entry1": false,
-  "leader_entry:2026-08-25:PYPL": true,
-  "leader_entry:2026-08-25:ADBE": true,
-  "leader_entry:2026-08-25:CVX": true,
-  "leader_entry:2026-08-25:XOM": true,
-  "leader_entry:2026-08-25:CEG": true,
-  "leader_entry:2026-08-25:BKNG": true,
-  "leader_entry:2026-08-25:MDB": true,
-  "leader_entry:2026-08-25:NOW": true
+  "leader_entry:2026-08-26:PYPL": true,
+  "leader_entry:2026-08-26:MA": true,
+  "leader_entry:2026-08-26:CEG": true,
+  "leader_entry:2026-08-26:CVX": true,
+  "leader_entry:2026-08-26:CRM": true,
+  "leader_entry:2026-08-26:ACN": true
 }
