@@ -1,4 +1,6 @@
 import os
+import json
+from pathlib import Path
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -7,6 +9,7 @@ import yfinance as yf
 
 
 NEW_YORK = ZoneInfo("America/New_York")
+SECTOR_STATE_FILE=Path("data/us_sector_flow_state.json")
 
 SECTOR_GROUPS = {
     "AI·소프트웨어": ["MSFT","ORCL","CRM","NOW","ADBE","PLTR","SNOW","DDOG","MDB","APP","IBM","ACN"],
@@ -27,6 +30,27 @@ SECTOR_GROUPS = {
 def _market_date():
     return datetime.now(timezone.utc).astimezone(NEW_YORK).date()
 
+
+
+def _stable_sector_label(name,score):
+    today=str(_market_date())
+    try:state=json.loads(SECTOR_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:state={}
+    target="leader" if score>=70 else "laggard" if score<30 else "neutral"
+    item=state.get(name,{});confirmed=item.get("confirmed","neutral");pending=item.get("pending","");count=int(item.get("count",0));last=item.get("last_date","")
+    if target==confirmed:pending="";count=0
+    elif last!=today:
+        count=count+1 if pending==target else 1;pending=target
+        if count>=2:confirmed=target;pending="";count=0
+    state[name]={"confirmed":confirmed,"pending":pending,"count":count,"last_date":today,"score":round(score,1)}
+    try:
+        SECTOR_STATE_FILE.parent.mkdir(parents=True,exist_ok=True);SECTOR_STATE_FILE.write_text(json.dumps(state,ensure_ascii=False,indent=2),encoding="utf-8")
+    except Exception:pass
+    if confirmed=="leader" and score>=55:return "🟢 주도업종"
+    if confirmed=="laggard" and score<45:return "🔴 부진업종"
+    if score>=70:return "🟠 주도후보"
+    if score<30:return "🟡 약화"
+    return "🔵 중립"
 
 def scan_sector_leaders(max_sectors=5, representatives=3, require_today=False):
     symbols=list(dict.fromkeys(sym for members in SECTOR_GROUPS.values() for sym in members))
@@ -92,16 +116,16 @@ def scan_sector_leaders(max_sectors=5, representatives=3, require_today=False):
         breadth=sum(x["trend"] for x in members)/len(members)*100
         volume=sum(x["volume_ratio"] for x in members)/len(members)
         sector_score=max(0,min(100,50+avg20*1.1+avg60*.35+(breadth-50)*.25+min(volume,2)*5))
-        strength="강세" if sector_score>=70 and avg20>0 else "중립" if sector_score>=55 else "약세"
+        evaluation=_stable_sector_label(sector,sector_score);strength="강세" if evaluation=="🟢 주도업종" else "중립" if evaluation in ("🟠 주도후보","🔵 중립") else "약세"
         reps=sorted(
             [x for x in members if x["trend"] and x["return20"]>=0],
             key=lambda x:(x["ready"],x["score"]),reverse=True
         )[:representatives]
         sectors.append({
             "sector":sector,"score":sector_score,"return20":avg20,"return60":avg60,
-            "breadth":breadth,"volume_ratio":volume,"strength":strength,"representatives":reps,
+            "breadth":breadth,"volume_ratio":volume,"strength":strength,"evaluation":evaluation,"representatives":reps,
         })
     sectors.sort(key=lambda x:x["score"],reverse=True)
-    selected=[x for x in sectors if x["strength"]!="약세"][:max_sectors]
+    selected=sectors[:max_sectors]
     return selected
 
