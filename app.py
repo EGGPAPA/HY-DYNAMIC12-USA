@@ -487,65 +487,69 @@ def render_usa_top12_blink(top):
 @st.cache_data(ttl=600, show_spinner=False)
 def usa_leader_entry_conditions(cache_version="sector-duration-v2"):
     """강한 업종을 먼저 찾고 업종별 대표 주도주 2~3개를 반환합니다."""
-    return scan_sector_leaders(max_sectors=5,representatives=3)
-
-
-def render_usa_leader_entry_panel():
-    st.subheader("🚦 미국 주도 업종 · 대표 종목")
-    st.caption("업종의 20일·60일 성과와 상승 종목 비율을 먼저 평가하고, 강한 업종마다 대표 종목 2~3개만 선별합니다.")
-    try:
-        sectors=usa_leader_entry_conditions()
-    except Exception as e:
-        st.warning(f"주도 업종을 불러오지 못했습니다: {e}")
-        return
-    if not sectors:
-        st.info("현재 강세 기준을 통과한 미국 주도 업종이 없습니다.")
-        return
-    ready=[x for s in sectors for x in s["representatives"] if x["ready"]]
-    c1,c2,c3=st.columns(3)
-    c1.metric("주도 업종",f"{len(sectors)}개")
-    c2.metric("4조건 충족",f"{len(ready)}종목")
-    c3.metric("업종별 대표","최대 3종목")
-    if ready:
-        st.success("1차 분할매수 검토: "+", ".join(f"{x['sector']} · {x['ticker']}" for x in ready))
-    else:
-        st.info("현재 네 조건을 모두 충족한 종목은 없습니다. 자동 감시는 계속됩니다.")
-    summary=[]
-    for s in sectors:
-        leader=s["representatives"][0] if s["representatives"] else {}
-        summary.append({
-            "업종":s["sector"],
-            "최강 종목":f"⭐ {leader.get('ticker','-')}",
-            "현재가($)":round(leader["price"],2) if leader else "-",
-            "종목 20일(%)":round(leader["return20"],1) if leader else "-",
-            "주도 지속":f"{leader.get('leader_days',0)}일" if leader else "-",
-            "매수 신호":"🟢 1차 검토" if leader.get("ready") else "⏳ 관찰",
-            "업종 20일(%)":round(s["return20"],1),
-            "상승종목 비율(%)":round(s["breadth"],0),
-            "업종 평가":"🟢 강세" if s["strength"]=="강세" else "🔵 중립",
-            "2·3위 종목":", ".join(x["ticker"] for x in s["representatives"][1:]) or "-",
-            "업종점수":round(s["score"],1),
-        })
-    st.dataframe(pd.DataFrame(summary),use_container_width=True,hide_index=True)
+    sectors=scan_sector_leaders(max_sectors=5,representatives=3)
     for sector in sectors:
-        with st.expander(f"{sector['sector']} · 대표 종목 {len(sector['representatives'])}개",expanded=sector is sectors[0]):
-            rows=[]
-            for x in sector["representatives"]:
-                rows.append({
-                    "종목":x["ticker"],"현재가($)":round(x["price"],2),
-                    "20일 수익률(%)":round(x["return20"],1),"60일 수익률(%)":round(x["return60"],1),
-                    "최초 포착일":x.get("leader_start","-"),
-                    "주도 지속(거래일)":x.get("leader_days",0),
-                    "1차 관찰가($)":round(x["observation"],2),
-                    "관찰가 ±2%":"✅" if x["near_observation"] else "대기",
-                    "20일선 위":"✅" if x["above_ma20"] else "대기",
-                    "거래량 ≥0.7배":"✅" if x["volume_ok"] else "대기",
-                    "무효선 위":"✅" if x["above_invalidation"] else "대기",
-                    "최종 신호":"🟢 1차 분할매수 검토" if x["ready"] else "⏳ 관찰",
-                    "주도점수":round(x["score"],1),
-                })
-            st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+        confirmed=sector.get("evaluation")=="🟢 주도업종"
+        for row in sector.get("representatives",[]):
+            row["technical_ready"]=bool(row.get("ready"));row["ready"]=bool(row.get("ready")) and confirmed
+    return sectors
 
+
+@st.cache_data(ttl=10,show_spinner=False)
+def _usa_live_prices(tickers):
+    tickers=tuple(dict.fromkeys(str(x).strip().upper() for x in tickers if str(x).strip()))
+    if not tickers:return {}
+    prices={}
+    for period,interval in (("1d","1m"),("5d","1d")):
+        missing=[x for x in tickers if x not in prices]
+        if not missing:break
+        try:
+            data=yf.download(missing,period=period,interval=interval,prepost=False,auto_adjust=True,progress=False,threads=True,group_by="ticker")
+            for ticker in missing:
+                try:
+                    frame=data[ticker] if isinstance(data.columns,pd.MultiIndex) else data;close=pd.to_numeric(frame["Close"],errors="coerce").dropna()
+                    if not close.empty:prices[ticker]=float(close.iloc[-1])
+                except Exception:continue
+        except Exception:continue
+    return prices
+
+@st.fragment(run_every="10s")
+def render_usa_leader_entry_panel():
+    st.subheader("🟢 강한 상승 종목 모아보기")
+    st.caption("업종의 중기 흐름과 종목의 가격·추세·거래량을 함께 평가합니다. 주도·부진 확정은 미국 거래일 기준 2회 연속 확인합니다.")
+    try:sectors=usa_leader_entry_conditions()
+    except Exception as e:st.warning(f"주도 업종을 불러오지 못했습니다: {e}");return
+    if not sectors:st.info("현재 평가 가능한 미국 업종이 없습니다.");return
+    tickers=[x["ticker"] for s in sectors for x in s.get("representatives",[])];prices=_usa_live_prices(tuple(tickers));rows=[]
+    for s in sectors:
+        evaluation=s.get("evaluation","🔵 중립")
+        for x0 in s.get("representatives",[]):
+            x=dict(x0);price=float(prices.get(x["ticker"],x["price"]));observation=float(x["observation"]);ma20=float(x["ma20"]);invalidation=float(x["invalidation"])
+            near=abs(price/observation-1)<=.02;above20=price>=ma20;volume_ok=bool(x["volume_ok"]);above_invalid=price>invalidation
+            technical=bool(x["trend"] and x["return20"]>=5 and near and above20 and volume_ok and above_invalid)
+            if technical and evaluation=="🟢 주도업종":final="🚨 최종 매수조건 충족"
+            elif technical and evaluation in ("🟠 주도후보","🔵 중립"):final="🟡 소액 1차 검토"
+            elif technical:final="🔵 기술조건만·업종 회복 대기"
+            else:final="⏳ 대기"
+            rows.append({"최종 매수판정":final,"종목":x["ticker"],"업종":s["sector"],"업종 평가":evaluation,"충족 수":f"{sum((near,above20,volume_ok,above_invalid))}/4","현재가($)":round(price,2),"1차 관찰가($)":round(observation,2),"2차 관찰가($)":round(max(float(x["ma60"])*1.02,ma20*.96),2),"추세 무효선($)":round(invalidation,2),"20일 수익률(%)":round(x["return20"],1),"60일 수익률(%)":round(x["return60"],1),"관찰가 ±2%":"✅" if near else "대기","20일선 위":"✅" if above20 else "대기","거래량 ≥0.7배":"✅" if volume_ok else "대기","무효선 위":"✅" if above_invalid else "대기"})
+    result=pd.DataFrame(rows);priority={"🚨 최종 매수조건 충족":0,"🟡 소액 1차 검토":1,"🔵 기술조건만·업종 회복 대기":2,"⏳ 대기":3}
+    result["_순서"]=result["최종 매수판정"].map(priority).fillna(9);result=result.sort_values(["_순서","업종","종목"]).drop(columns="_순서")
+    counts=result["최종 매수판정"].value_counts();summary=" · ".join(f"{name} {int(counts.get(name,0))}개" for name in priority if int(counts.get(name,0))>0)
+    st.info("업종 반영 최종 요약 · "+summary);st.caption("현재가는 Yahoo 장중 1분 가격을 우선 사용해 10초마다 확인하며, 없으면 최근 일봉 종가로 보완합니다.")
+    st.dataframe(result[["최종 매수판정","종목","업종","업종 평가","충족 수","현재가($)","1차 관찰가($)","2차 관찰가($)","추세 무효선($)","20일 수익률(%)","60일 수익률(%)"]],use_container_width=True,hide_index=True)
+    st.markdown("#### 매수조건 확인");st.dataframe(result[["종목","현재가($)","1차 관찰가($)","관찰가 ±2%","20일선 위","거래량 ≥0.7배","무효선 위","최종 매수판정"]],use_container_width=True,hide_index=True)
+    ready=result[result["최종 매수판정"].eq("🚨 최종 매수조건 충족")].copy();st.markdown("#### 카카오 최종 매수조건 알림")
+    k1,k2,k3=st.columns([1,1,1.4]);k1.metric("카카오 연결","✅ 준비됨" if bool(KAKAO_REST_API_KEY and KAKAO_REFRESH_TOKEN) else "⚠️ 설정 필요");k2.metric("현재 최종 신호",f"{len(ready)}종목")
+    auto=k3.toggle("조건 신규충족 시 자동알림",value=True,disabled=not bool(KAKAO_REST_API_KEY and KAKAO_REFRESH_TOKEN),key="usa_sector_kakao_auto")
+    message="[HY DYNAMIC12 USA 최종 매수조건]\n"+("\n".join(f"{r['종목']} · {r['업종']} · 현재 $ {r['현재가($)']:,.2f} · 관찰 $ {r['1차 관찰가($)']:,.2f}" for _,r in ready.iterrows()) if not ready.empty else "현재 충족 종목 없음")
+    if st.button("📨 현재 최종 신호 카카오 알림 보내기",disabled=not bool(KAKAO_REST_API_KEY and KAKAO_REFRESH_TOKEN) or ready.empty,use_container_width=True,key="usa_sector_kakao_manual"):
+        try:kakao_send_to_me(message);st.success("카카오 알림을 보냈습니다.")
+        except Exception as e:st.error(str(e))
+    signature="|".join(sorted(ready["종목"].astype(str))) if not ready.empty else ""
+    if auto and bool(KAKAO_REST_API_KEY and KAKAO_REFRESH_TOKEN) and signature and st.session_state.get("usa_sector_alert_signature")!=signature:
+        try:kakao_send_to_me(message);st.session_state["usa_sector_alert_signature"]=signature;st.success("새 최종 매수조건 종목을 카카오로 보냈습니다.")
+        except Exception as e:st.warning(str(e))
+    st.caption("업종 단계는 20·60일 흐름과 상승 확산을 반영합니다. 자동알림은 앱이 열려 있는 동안 작동합니다.")
 
 def render_usa_integrated_buy_panel(top):
     st.subheader("🎯 USA 통합 매수판정")
