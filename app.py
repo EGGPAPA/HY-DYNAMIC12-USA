@@ -266,7 +266,7 @@ def run_usa_unified_update(cfg,precise,status):
     completed=datetime.now(SEOUL).strftime("%Y-%m-%d %H:%M:%S KST");st.session_state["usa_full_update_at"]=completed;st.session_state["usa_update_mode"]="정밀 전체" if precise else "빠른";status.write("✅ ⑥ 저장 및 화면 갱신 완료");return completed
 
 
-st.set_page_config(page_title="HY DYNAMIC12 USA V2.2 BLINK",page_icon="🇺🇸",layout="wide")
+st.set_page_config(page_title="HY DYNAMIC12 · 미국주식 실전선별",page_icon="🇺🇸",layout="wide")
 
 st.markdown("""
 <style>
@@ -381,7 +381,7 @@ div[data-testid="stDataFrame"] {font-size: 0.88rem;}
 }
 </style>
 """, unsafe_allow_html=True)
-st.title("HY DYNAMIC12 USA V2.3 · BLINK + KAKAO")
+st.title("🇺🇸 HY DYNAMIC12 · 미국주식 실전선별")
 st.caption("KR과 동일한 흐름: 미국시장 → TOP12 → 부의 점프 → 5개월선 → 보유종목 · 미국 수급은 거래대금/상대강도/시총 모멘텀으로 대체")
 s=settings()
 
@@ -584,9 +584,9 @@ def render_usa_integrated_buy_panel(top):
     if not ma_rows:st.warning("5개월선 결과가 없습니다. 빠른 또는 정밀 전체 업데이트를 실행해야 완전한 통합판정이 가능합니다.")
 
 
-tabs=st.tabs(["🏆 USA TOP12","🔎 전체시장 분석","🚀 부의 점프·상세","💰 자금관리","⚙️ KIS 설정","🔔 카카오","📋 전략 규칙","🔥 5개월선 돌파","📈 전략검증"])
+tabs=st.tabs(["🔎 전체시장 분석","🏆 USA TOP12","🚀 부의 점프","🔥 현재 5개월선 돌파","📈 과거 성과 검증","💰 자금관리","📋 전략 규칙","⚙️ KIS 설정","🔔 카카오"])
 
-with tabs[4]:
+with tabs[7]:
     st.subheader("KIS 설정")
     env=st.selectbox("환경",["real","demo"],index=0 if s["env"]=="real" else 1)
     k=st.text_input("새 App Key",type="password")
@@ -596,8 +596,8 @@ with tabs[4]:
     if st.button("KIS 설정 저장"):
         save(k,sec,ac,pr,env); st.success("저장 완료"); st.rerun()
 
-with tabs[1]:
-    st.subheader("NASDAQ + NYSE + AMEX 주도주 스캔")
+with tabs[0]:
+    st.subheader("🔎 NASDAQ + NYSE + AMEX 전체시장 분석")
     c1,c2=st.columns(2)
     cand_n=c1.number_input("정밀분석 후보 수",20,70,40,5)
     per_source=c2.number_input("거래소별·랭킹별 수집 수",10,40,25,5)
@@ -688,7 +688,7 @@ with tabs[1]:
             save_json(TOP12_FILE,valid_rows[:12]); save_kakao_watchlist(valid_rows[:12])
             bar.empty();msg.success(f"USA TOP12 생성 완료 · 정상분석 {len(valid_rows)}개")
 
-with tabs[0]:
+with tabs[1]:
     rows=st.session_state.get("us_ranked",[])
     if not rows:
         rows=load_json(TOP12_FILE,[])
@@ -921,7 +921,7 @@ with tabs[2]:
             else:st.success("이격이 과도하지 않습니다. 판정점수와 1·2차 매수가를 함께 확인하세요.")
         except Exception as e: st.error(str(e))
 
-with tabs[3]:
+with tabs[5]:
     st.subheader("자금관리 · 1,000만원 기준")
     total=st.number_input("총 운용자금(원)",value=10000000,step=100000)
     st.write("권장: 4~6종목 / 종목당 15~20% / 1차 50% + 2차 50% / 평균매수가 대비 -3% 손절")
@@ -966,7 +966,7 @@ with tabs[3]:
     else:
         st.info("TOP12 생성 후 종목별 수익관리 가격이 표시됩니다.")
 
-with tabs[5]:
+with tabs[8]:
     st.subheader("🔔 카카오 연결")
     c1,c2,c3=st.columns(3)
     c1.metric("REST API KEY","설정됨" if KAKAO_REST_API_KEY else "미설정")
@@ -1009,9 +1009,9 @@ with tabs[6]:
 - 주도주 자동알림: 1차 관찰가 ±2% + 20일선 위 + 거래량 0.7배 이상 + 추세 무효선 위를 모두 충족할 때 발송
 """)
 
-with tabs[7]:
+with tabs[3]:
     render_monthly_breakout_tab()
 
-with tabs[8]:
+with tabs[4]:
     render_usa_backtest_tab()
 
