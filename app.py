@@ -619,8 +619,19 @@ with tabs[1]:
             cand=pd.DataFrame(_saved)
             st.session_state["us_candidates"]=cand
     if isinstance(cand,pd.DataFrame) and not cand.empty:
-        st.dataframe(cand,use_container_width=True,hide_index=True,
-            column_config={"pre_score":st.column_config.ProgressColumn("1차주도점수",min_value=0,max_value=100,format="%.1f")})
+        candidate_view=cand.sort_values("pre_score",ascending=False).copy()
+
+        def _candidate_score_color(value):
+            score=float(value)
+            if score>=80:return "color: #ff5b5b; font-weight: 700"
+            if score>=70:return "color: #ffb84d; font-weight: 700"
+            return "color: #5aa2ff; font-weight: 700"
+
+        styled_candidates=candidate_view.style.map(
+            _candidate_score_color,subset=["pre_score"]
+        )
+        st.dataframe(styled_candidates,use_container_width=True,hide_index=True,
+            column_config={"pre_score":st.column_config.NumberColumn("1차주도점수",format="%.1f")})
         if st.button("② 정밀분석 → USA TOP12",type="primary",use_container_width=True):
             import yfinance as yf
             api=KISUS(s); rows=[]; details={}
