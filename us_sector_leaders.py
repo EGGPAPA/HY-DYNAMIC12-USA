@@ -32,8 +32,8 @@ def _market_date():
 
 
 
-def _stable_sector_label(name,score):
-    today=str(_market_date())
+def _stable_sector_label(name,score,evaluation_date):
+    today=str(evaluation_date)
     try:state=json.loads(SECTOR_STATE_FILE.read_text(encoding="utf-8"))
     except Exception:state={}
     target="leader" if score>=70 else "laggard" if score<30 else "neutral"
@@ -101,7 +101,7 @@ def scan_sector_leaders(max_sectors=5, representatives=3, require_today=False):
                     "observation":observation,"invalidation":invalidation,
                     "trend":trend,"ready":trend and r20>=5 and all(checks.values()),
                     "leader_start":leader_start,"leader_days":leader_days,
-                    "score":score,**checks,
+                    "score":score,"data_date":str(latest_date),**checks,
                 })
             except Exception:
                 continue
@@ -116,7 +116,7 @@ def scan_sector_leaders(max_sectors=5, representatives=3, require_today=False):
         breadth=sum(x["trend"] for x in members)/len(members)*100
         volume=sum(x["volume_ratio"] for x in members)/len(members)
         sector_score=max(0,min(100,50+avg20*1.1+avg60*.35+(breadth-50)*.25+min(volume,2)*5))
-        evaluation=_stable_sector_label(sector,sector_score);strength="강세" if evaluation=="🟢 주도업종" else "중립" if evaluation in ("🟠 주도후보","🔵 중립") else "약세"
+        evaluation=_stable_sector_label(sector,sector_score,max(x["data_date"] for x in members));strength="강세" if evaluation=="🟢 주도업종" else "중립" if evaluation in ("🟠 주도후보","🔵 중립") else "약세"
         reps=sorted(
             [x for x in members if x["trend"] and x["return20"]>=0],
             key=lambda x:(x["ready"],x["score"]),reverse=True
