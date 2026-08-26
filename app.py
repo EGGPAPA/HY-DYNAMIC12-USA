@@ -619,7 +619,9 @@ with tabs[1]:
             cand=pd.DataFrame(_saved)
             st.session_state["us_candidates"]=cand
     if isinstance(cand,pd.DataFrame) and not cand.empty:
-        candidate_view=cand.sort_values("pre_score",ascending=False).copy()
+        candidate_view=cand.drop(
+            columns=["sources","source_count"],errors="ignore"
+        ).sort_values("pre_score",ascending=False).copy()
 
         def _candidate_score_color(value):
             score=float(value)
