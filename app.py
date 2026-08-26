@@ -268,6 +268,14 @@ def run_usa_unified_update(cfg,precise,status):
 
 st.set_page_config(page_title="HY DYNAMIC12 · 미국주식 실전선별",page_icon="🇺🇸",layout="wide")
 
+st.markdown(
+    '<style>[data-testid="stSidebarNav"]{display:none;}</style>',
+    unsafe_allow_html=True,
+)
+with st.sidebar:
+    st.page_link("app.py",label="미국주식 실전선별",icon="🇺🇸")
+    st.page_link("pages/7_보유종목관리.py",label="보유종목관리",icon="💼")
+
 st.markdown("""
 <style>
 /* HY MOBILE V2.0 */

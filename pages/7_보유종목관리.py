@@ -21,6 +21,14 @@ def github_pat():
 
 st.set_page_config(page_title="보유종목 관리", page_icon="💼", layout="wide")
 
+st.markdown(
+    '<style>[data-testid="stSidebarNav"]{display:none;}</style>',
+    unsafe_allow_html=True,
+)
+with st.sidebar:
+    st.page_link("app.py",label="미국주식 실전선별",icon="🇺🇸")
+    st.page_link("pages/7_보유종목관리.py",label="보유종목관리",icon="💼")
+
 @st.cache_data(ttl=900,show_spinner=False)
 def get_holding_assessment(ticker):
     try:
