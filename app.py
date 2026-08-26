@@ -549,18 +549,7 @@ def render_usa_leader_entry_panel():
     st.info("업종 반영 최종 요약 · "+summary);st.caption("현재가는 Yahoo 장중 1분 가격을 우선 사용해 10초마다 확인하며, 없으면 최근 일봉 종가로 보완합니다.")
     st.dataframe(result[["최종 매수판정","종목","TOP12","업종","업종 평가","충족 수","현재가($)","1차 관찰가($)","2차 관찰가($)","추세 무효선($)","20일 수익률(%)","60일 수익률(%)"]],use_container_width=True,hide_index=True)
     st.markdown("#### 매수조건 확인");st.dataframe(result[["종목","현재가($)","1차 관찰가($)","관찰가 ±2%","20일선 위","거래량 ≥0.7배","무효선 위","최종 매수판정"]],use_container_width=True,hide_index=True)
-    ready=result[result["최종 매수판정"].eq("🚨 최종 매수조건 충족")].copy();st.markdown("#### 카카오 최종 매수조건 알림")
-    k1,k2,k3=st.columns([1,1,1.4]);k1.metric("카카오 연결","✅ 준비됨" if bool(KAKAO_REST_API_KEY and KAKAO_REFRESH_TOKEN) else "⚠️ 설정 필요");k2.metric("현재 최종 신호",f"{len(ready)}종목")
-    auto=k3.toggle("조건 신규충족 시 자동알림",value=True,disabled=not bool(KAKAO_REST_API_KEY and KAKAO_REFRESH_TOKEN),key="usa_sector_kakao_auto")
-    message="[HY DYNAMIC12 USA 최종 매수조건]\n"+("\n".join(f"{r['종목']} · {r['업종']} · 현재 $ {r['현재가($)']:,.2f} · 관찰 $ {r['1차 관찰가($)']:,.2f}" for _,r in ready.iterrows()) if not ready.empty else "현재 충족 종목 없음")
-    if st.button("📨 현재 최종 신호 카카오 알림 보내기",disabled=not bool(KAKAO_REST_API_KEY and KAKAO_REFRESH_TOKEN) or ready.empty,use_container_width=True,key="usa_sector_kakao_manual"):
-        try:kakao_send_to_me(message);st.success("카카오 알림을 보냈습니다.")
-        except Exception as e:st.error(str(e))
-    signature="|".join(sorted(ready["종목"].astype(str))) if not ready.empty else ""
-    if auto and bool(KAKAO_REST_API_KEY and KAKAO_REFRESH_TOKEN) and signature and st.session_state.get("usa_sector_alert_signature")!=signature:
-        try:kakao_send_to_me(message);st.session_state["usa_sector_alert_signature"]=signature;st.success("새 최종 매수조건 종목을 카카오로 보냈습니다.")
-        except Exception as e:st.warning(str(e))
-    st.caption("업종 단계는 20·60일 흐름과 상승 확산을 반영합니다. 자동알림은 앱이 열려 있는 동안 작동합니다.")
+    st.caption("업종 단계는 20·60일 흐름과 상승 확산을 반영한 통합판정의 보조 신호입니다.")
 
 def render_usa_integrated_buy_panel(top):
     st.subheader("🎯 USA 통합 매수판정")
@@ -601,6 +590,40 @@ def render_usa_integrated_buy_panel(top):
         )
         st.info(f"현재 매수검토 종목은 없습니다. 가장 가까운 후보: {nearest_text}")
     st.dataframe(pd.DataFrame(results),use_container_width=True,hide_index=True)
+
+    st.markdown("#### 카카오 통합 매수판정 알림")
+    kakao_ready=bool(KAKAO_REST_API_KEY and KAKAO_REFRESH_TOKEN)
+    k1,k2,k3=st.columns([1,1,1.4])
+    k1.metric("카카오 연결","✅ 준비됨" if kakao_ready else "⚠️ 설정 필요")
+    k2.metric("현재 통합 신호",f"{len(buy)}종목")
+    auto=k3.toggle(
+        "3/4·4/4 신규충족 시 자동알림",
+        value=True,
+        disabled=not kakao_ready,
+        key="usa_integrated_kakao_auto",
+    )
+    message="[HY DYNAMIC12 USA 통합 매수판정]\n"+(
+        "\n".join(
+            f"{x['티커']} · {x['교차포착']} · {x['통합판정']} · {x['행동']}"
+            for x in buy
+        ) if buy else "현재 통합 매수검토 종목 없음"
+    )
+    if st.button(
+        "📨 현재 통합 신호 카카오 알림 보내기",
+        disabled=not kakao_ready or not buy,
+        use_container_width=True,
+        key="usa_integrated_kakao_manual",
+    ):
+        try:kakao_send_to_me(message);st.success("통합 매수판정 알림을 보냈습니다.")
+        except Exception as e:st.error(str(e))
+    signature="|".join(sorted(f"{x['티커']}:{x['교차포착']}" for x in buy))
+    if auto and kakao_ready and signature and st.session_state.get("usa_integrated_alert_signature")!=signature:
+        try:
+            kakao_send_to_me(message)
+            st.session_state["usa_integrated_alert_signature"]=signature
+            st.success("새 통합 매수판정 종목을 카카오로 보냈습니다.")
+        except Exception as e:st.warning(str(e))
+    st.caption("카카오 최종 알림은 USA 통합판정 3/4 또는 4/4 종목에만 발송됩니다.")
     if not ma_rows:st.warning("5개월선 결과가 없습니다. 빠른 또는 정밀 전체 업데이트를 실행해야 완전한 통합판정이 가능합니다.")
 
 
