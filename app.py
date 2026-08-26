@@ -528,7 +528,10 @@ def render_usa_leader_entry_panel():
     try:sectors=usa_leader_entry_conditions()
     except Exception as e:st.warning(f"주도 업종을 불러오지 못했습니다: {e}");return
     if not sectors:st.info("현재 평가 가능한 미국 업종이 없습니다.");return
-    tickers=[x["ticker"] for s in sectors for x in s.get("representatives",[])];prices=_usa_live_prices(tuple(tickers));rows=[]
+    tickers=[x["ticker"] for s in sectors for x in s.get("representatives",[])]
+    saved_top=load_json(TOP12_FILE,[])
+    top_tickers={str(row.get("티커","")).strip().upper() for row in saved_top[:12]}
+    prices=_usa_live_prices(tuple(tickers));rows=[]
     for s in sectors:
         evaluation=s.get("evaluation","🔵 중립")
         for x0 in s.get("representatives",[]):
@@ -539,12 +542,12 @@ def render_usa_leader_entry_panel():
             elif technical and evaluation in ("🟠 주도후보","🔵 중립"):final="🟡 소액 1차 검토"
             elif technical:final="🔵 기술조건만·업종 회복 대기"
             else:final="⏳ 대기"
-            rows.append({"최종 매수판정":final,"종목":x["ticker"],"업종":s["sector"],"업종 평가":evaluation,"충족 수":f"{sum((near,above20,volume_ok,above_invalid))}/4","현재가($)":round(price,2),"1차 관찰가($)":round(observation,2),"2차 관찰가($)":round(max(float(x["ma60"])*1.02,ma20*.96),2),"추세 무효선($)":round(invalidation,2),"20일 수익률(%)":round(x["return20"],1),"60일 수익률(%)":round(x["return60"],1),"관찰가 ±2%":"✅" if near else "대기","20일선 위":"✅" if above20 else "대기","거래량 ≥0.7배":"✅" if volume_ok else "대기","무효선 위":"✅" if above_invalid else "대기"})
+            rows.append({"최종 매수판정":final,"종목":x["ticker"],"TOP12":"✅ 포함" if x["ticker"] in top_tickers else "미포함","업종":s["sector"],"업종 평가":evaluation,"충족 수":f"{sum((near,above20,volume_ok,above_invalid))}/4","현재가($)":round(price,2),"1차 관찰가($)":round(observation,2),"2차 관찰가($)":round(max(float(x["ma60"])*1.02,ma20*.96),2),"추세 무효선($)":round(invalidation,2),"20일 수익률(%)":round(x["return20"],1),"60일 수익률(%)":round(x["return60"],1),"관찰가 ±2%":"✅" if near else "대기","20일선 위":"✅" if above20 else "대기","거래량 ≥0.7배":"✅" if volume_ok else "대기","무효선 위":"✅" if above_invalid else "대기"})
     result=pd.DataFrame(rows);priority={"🚨 최종 매수조건 충족":0,"🟡 소액 1차 검토":1,"🔵 기술조건만·업종 회복 대기":2,"⏳ 대기":3}
     result["_순서"]=result["최종 매수판정"].map(priority).fillna(9);result=result.sort_values(["_순서","업종","종목"]).drop(columns="_순서")
     counts=result["최종 매수판정"].value_counts();summary=" · ".join(f"{name} {int(counts.get(name,0))}개" for name in priority if int(counts.get(name,0))>0)
     st.info("업종 반영 최종 요약 · "+summary);st.caption("현재가는 Yahoo 장중 1분 가격을 우선 사용해 10초마다 확인하며, 없으면 최근 일봉 종가로 보완합니다.")
-    st.dataframe(result[["최종 매수판정","종목","업종","업종 평가","충족 수","현재가($)","1차 관찰가($)","2차 관찰가($)","추세 무효선($)","20일 수익률(%)","60일 수익률(%)"]],use_container_width=True,hide_index=True)
+    st.dataframe(result[["최종 매수판정","종목","TOP12","업종","업종 평가","충족 수","현재가($)","1차 관찰가($)","2차 관찰가($)","추세 무효선($)","20일 수익률(%)","60일 수익률(%)"]],use_container_width=True,hide_index=True)
     st.markdown("#### 매수조건 확인");st.dataframe(result[["종목","현재가($)","1차 관찰가($)","관찰가 ±2%","20일선 위","거래량 ≥0.7배","무효선 위","최종 매수판정"]],use_container_width=True,hide_index=True)
     ready=result[result["최종 매수판정"].eq("🚨 최종 매수조건 충족")].copy();st.markdown("#### 카카오 최종 매수조건 알림")
     k1,k2,k3=st.columns([1,1,1.4]);k1.metric("카카오 연결","✅ 준비됨" if bool(KAKAO_REST_API_KEY and KAKAO_REFRESH_TOKEN) else "⚠️ 설정 필요");k2.metric("현재 최종 신호",f"{len(ready)}종목")
@@ -576,18 +579,27 @@ def render_usa_integrated_buy_panel(top):
         wealth_ok=score>=75 and leader>=70 and technical>=55 and fundamental>=50
         ma=ma_map.get(ticker,{});ma_ok=bool(ma) and ma.get("판정")!="⚪ 제외" and float(ma.get("돌파율(%)",-999) or -999)>0
         sector=sector_map.get(ticker,{});sector_ok=bool(sector.get("ready"))
-        count=sum((top_ok,wealth_ok,ma_ok,sector_ok))
+        checks={"TOP12":top_ok,"부의 점프":wealth_ok,"5개월선":ma_ok,"주도업종":sector_ok}
+        count=sum(checks.values())
+        missing=" · ".join(name for name,ok in checks.items() if not ok) or "없음"
         if count==4:decision="🟢 적극매수 검토";action="1차 20~30% 분할매수"
         elif count==3 and (top_ok or wealth_ok):decision="🟢 1차매수 검토";action="1차 10~20% · 눌림 확인"
         elif count==2:decision="🟡 관찰·눌림대기";action="신호 1개 추가 확인"
         else:decision="⚪ 매수보류";action="단독 신호로 매수 금지"
-        results.append({"종합순위":0,"종목":row.get("종목"),"티커":ticker,"현재가($)":row.get("현재가($)"),"TOP12":"✅" if top_ok else "-","부의점프":"✅" if wealth_ok else "대기","5개월선":"✅" if ma_ok else "대기","주도업종":"✅" if sector_ok else "대기","교차포착":f"{count}/4","통합판정":decision,"행동":action,"1차매수가($)":row.get("1차매수가($)"),"2차매수가($)":row.get("2차매수가($)"),"업종":sector.get("sector","-")})
+        results.append({"종합순위":0,"종목":row.get("종목"),"티커":ticker,"현재가($)":row.get("현재가($)"),"TOP12":"✅" if top_ok else "-","부의점프":"✅" if wealth_ok else "대기","5개월선":"✅" if ma_ok else "대기","주도업종":"✅" if sector_ok else "대기","교차포착":f"{count}/4","부족조건":missing,"통합판정":decision,"행동":action,"1차매수가($)":row.get("1차매수가($)"),"2차매수가($)":row.get("2차매수가($)"),"업종":sector.get("sector","-")})
     results.sort(key=lambda x:(int(x["교차포착"].split("/")[0]),float(next((r.get("USA점수",0) for r in top if r.get("티커")==x["티커"]),0) or 0)),reverse=True)
     for i,row in enumerate(results,1):row["종합순위"]=i
     buy=[x for x in results if x["통합판정"].startswith("🟢")]
     a,b,c,d=st.columns(4);a.metric("4/4 강한포착",sum(x["교차포착"]=="4/4" for x in results));b.metric("3/4 후보",sum(x["교차포착"]=="3/4" for x in results));c.metric("오늘 매수검토",len(buy));d.metric("단독 업종신호","매수 금지")
-    if buy:st.success("오늘 통합 매수검토: "+", ".join(f"{x['티커']}({x['교차포착']})" for x in buy[:4]))
-    else:st.info("현재 3개 이상 교차 포착된 종목이 없습니다. 현금 대기하고 신호가 겹칠 때까지 기다립니다.")
+    if buy:
+        st.success("오늘 통합 매수검토: "+", ".join(f"{x['티커']}({x['교차포착']})" for x in buy[:4]))
+    else:
+        best_count=max(int(x["교차포착"].split("/")[0]) for x in results)
+        nearest=[x for x in results if int(x["교차포착"].split("/")[0])==best_count]
+        nearest_text=", ".join(
+            f"{x['티커']}({x['교차포착']} · 부족: {x['부족조건']})" for x in nearest[:4]
+        )
+        st.info(f"현재 매수검토 종목은 없습니다. 가장 가까운 후보: {nearest_text}")
     st.dataframe(pd.DataFrame(results),use_container_width=True,hide_index=True)
     if not ma_rows:st.warning("5개월선 결과가 없습니다. 빠른 또는 정밀 전체 업데이트를 실행해야 완전한 통합판정이 가능합니다.")
 
