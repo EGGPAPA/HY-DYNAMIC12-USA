@@ -12,7 +12,12 @@ REPO = "EGGPAPA/HY-DYNAMIC12-USA"
 BRANCH = "main"
 HOLDINGS_PATH = "holdings.json"
 GITHUB_API = f"https://api.github.com/repos/{REPO}/contents/{HOLDINGS_PATH}"
-GITHUB_PAT = os.getenv("GITHUB_PAT", "").strip()
+def github_pat():
+    try:
+        value=st.secrets.get("GITHUB_PAT","")
+        if value:return str(value).strip()
+    except Exception:pass
+    return os.getenv("GITHUB_PAT","").strip()
 
 st.set_page_config(page_title="보유종목 관리", page_icon="💼", layout="wide")
 
@@ -67,8 +72,8 @@ def render_live_holdings_page():
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
-        if GITHUB_PAT:
-            h["Authorization"] = f"Bearer {GITHUB_PAT}"
+        if github_pat():
+            h["Authorization"] = f"Bearer {github_pat()}"
         return h
     
     
@@ -87,7 +92,7 @@ def render_live_holdings_page():
     
     
     def save_holdings(rows, sha, message):
-        if not GITHUB_PAT:
+        if not github_pat():
             raise RuntimeError("Streamlit Secrets에 GITHUB_PAT가 필요합니다.")
         content = json.dumps(rows, ensure_ascii=False, indent=2)
         payload = {
@@ -147,7 +152,7 @@ def render_live_holdings_page():
     
     c1, c2, c3 = st.columns(3)
     c1.metric("보유 종목", len(active))
-    c2.metric("GitHub 저장", "가능" if GITHUB_PAT else "GITHUB_PAT 필요")
+    c2.metric("GitHub 저장", "가능" if github_pat() else "GITHUB_PAT 필요")
     c3.metric("자동감시", "연결됨")
     
     if active:
