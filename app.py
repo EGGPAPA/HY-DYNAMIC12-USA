@@ -523,11 +523,16 @@ def _usa_live_prices(tickers):
 
 @st.fragment(run_every="10s")
 def render_usa_leader_entry_panel():
-    st.subheader("🟢 강한 상승 종목 모아보기")
-    st.caption("업종의 중기 흐름과 종목의 가격·추세·거래량을 함께 평가합니다. 주도·부진 확정은 미국 거래일 기준 2회 연속 확인합니다.")
-    try:sectors=usa_leader_entry_conditions()
-    except Exception as e:st.warning(f"주도 업종을 불러오지 못했습니다: {e}");return
-    if not sectors:st.info("현재 평가 가능한 미국 업종이 없습니다.");return
+    st.subheader("📊 미국 주도업종·대표종목 통합판")
+    st.caption("미국 업종별 주도력과 실제 대표 종목을 한 화면에서 비교합니다. 종목별 최종 매수판정은 아래 통합 매수판정에서만 표시합니다.")
+    try:
+        sectors=usa_leader_entry_conditions()
+    except Exception as e:
+        st.warning(f"주도 업종을 불러오지 못했습니다: {e}")
+        return
+    if not sectors:
+        st.info("현재 평가 가능한 미국 업종이 없습니다.")
+        return
     sector_chart=pd.DataFrame([{
         "업종":s["sector"],
         "주도점수":round(float(s.get("score",0)),1),
@@ -543,47 +548,20 @@ def render_usa_leader_entry_panel():
             else "🔴 이탈"
         ),
         "대표종목":", ".join(x.get("ticker","") for x in s.get("representatives",[])),
-    } for s in sectors]).sort_values("주도점수",ascending=False)
-    st.markdown("#### 📊 미국 주도업종 비교")
-    st.caption("미국 업종끼리 비교합니다. 주도점수는 추세·20/60일 상대강도·상승 확산·거래량을 합산한 0~100점입니다.")
-    chart_left,chart_right=st.columns(2)
-    with chart_left:
-        st.markdown("**주도점수와 상승 확산**")
-        st.bar_chart(sector_chart.set_index("업종")[["주도점수","상승확산(%)"]],height=360)
-    with chart_right:
-        st.markdown("**20일·60일 업종 수익률**")
-        st.bar_chart(sector_chart.set_index("업종")[["20일 수익률(%)","60일 수익률(%)"]],height=360)
+    } for s in sectors]).sort_values("주도점수",ascending=False).reset_index(drop=True)
+    first=sector_chart.iloc[0]
+    st.success(f"현재 1위 주도업종: {first['업종']} · {first['주도점수']:.1f}점 · 대표종목 {first['대표종목'] or '-'}")
+    st.markdown("**업종별 주도점수 비교**")
+    st.bar_chart(sector_chart.set_index("업종")[["주도점수"]],height=350)
     st.dataframe(
         sector_chart[["업종","상태","주도점수","상승확산(%)","20일 수익률(%)","60일 수익률(%)","거래량배수","대표종목"]],
-        use_container_width=True,hide_index=True,
+        use_container_width=True,hide_index=True,height=460,
         column_config={
             "주도점수":st.column_config.ProgressColumn("주도점수",min_value=0,max_value=100,format="%.1f"),
             "상승확산(%)":st.column_config.ProgressColumn("상승확산",min_value=0,max_value=100,format="%.1f%%"),
         },
     )
-    leader_sectors=sectors[:5]
-    tickers=[x["ticker"] for s in leader_sectors for x in s.get("representatives",[])]
-    saved_top=load_json(TOP12_FILE,[])
-    top_tickers={str(row.get("티커","")).strip().upper() for row in saved_top[:12]}
-    prices=_usa_live_prices(tuple(tickers));rows=[]
-    for s in leader_sectors:
-        evaluation=s.get("evaluation","🔵 중립")
-        for x0 in s.get("representatives",[]):
-            x=dict(x0);price=float(prices.get(x["ticker"],x["price"]));observation=float(x["observation"]);ma20=float(x["ma20"]);invalidation=float(x["invalidation"])
-            near=abs(price/observation-1)<=.02;above20=price>=ma20;volume_ok=bool(x["volume_ok"]);above_invalid=price>invalidation
-            technical=bool(x["trend"] and x["return20"]>=5 and near and above20 and volume_ok and above_invalid)
-            if technical and evaluation=="🟢 주도업종":final="🚨 최종 매수조건 충족"
-            elif technical and evaluation in ("🟠 주도후보","🔵 중립"):final="🟡 소액 1차 검토"
-            elif technical:final="🔵 기술조건만·업종 회복 대기"
-            else:final="⏳ 대기"
-            rows.append({"최종 매수판정":final,"종목":x["ticker"],"TOP12":"✅ 포함" if x["ticker"] in top_tickers else "미포함","업종":s["sector"],"업종 평가":evaluation,"충족 수":f"{sum((near,above20,volume_ok,above_invalid))}/4","현재가($)":round(price,2),"1차 관찰가($)":round(observation,2),"2차 관찰가($)":round(max(float(x["ma60"])*1.02,ma20*.96),2),"추세 무효선($)":round(invalidation,2),"20일 수익률(%)":round(x["return20"],1),"60일 수익률(%)":round(x["return60"],1),"관찰가 ±2%":"✅" if near else "대기","20일선 위":"✅" if above20 else "대기","거래량 ≥0.7배":"✅" if volume_ok else "대기","무효선 위":"✅" if above_invalid else "대기"})
-    result=pd.DataFrame(rows);priority={"🚨 최종 매수조건 충족":0,"🟡 소액 1차 검토":1,"🔵 기술조건만·업종 회복 대기":2,"⏳ 대기":3}
-    result["_순서"]=result["최종 매수판정"].map(priority).fillna(9);result=result.sort_values(["_순서","업종","종목"]).drop(columns="_순서")
-    counts=result["최종 매수판정"].value_counts();summary=" · ".join(f"{name} {int(counts.get(name,0))}개" for name in priority if int(counts.get(name,0))>0)
-    st.info("업종 반영 최종 요약 · "+summary);st.caption("현재가는 Yahoo 장중 1분 가격을 우선 사용해 10초마다 확인하며, 없으면 최근 일봉 종가로 보완합니다.")
-    st.dataframe(result[["최종 매수판정","종목","TOP12","업종","업종 평가","충족 수","현재가($)","1차 관찰가($)","2차 관찰가($)","추세 무효선($)","20일 수익률(%)","60일 수익률(%)"]],use_container_width=True,hide_index=True)
-    st.markdown("#### 매수조건 확인");st.dataframe(result[["종목","현재가($)","1차 관찰가($)","관찰가 ±2%","20일선 위","거래량 ≥0.7배","무효선 위","최종 매수판정"]],use_container_width=True,hide_index=True)
-    st.caption("업종 단계는 20·60일 흐름과 상승 확산을 반영한 통합판정의 보조 신호입니다.")
+    st.caption("상태 기준: 주도 → 확산 → 중립 → 둔화 → 이탈. 대표종목은 해당 업종 안에서 추세·상대강도·거래량 점수가 높은 최대 3종목입니다.")
 
 def render_usa_integrated_buy_panel(top):
     st.subheader("🎯 USA 통합 매수판정")
