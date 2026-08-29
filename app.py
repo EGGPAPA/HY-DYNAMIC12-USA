@@ -302,25 +302,25 @@ st.markdown("""
 
 /* 왼쪽 메뉴를 읽기 쉬운 크기로 확대 */
 section[data-testid="stSidebar"] {
-  min-width: 280px !important;
-  max-width: 280px !important;
+  min-width: 325px !important;
+  max-width: 325px !important;
 }
 section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {
   padding-top: 1.15rem;
 }
 section[data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"] {
-  min-height: 50px;
-  padding: .72rem .85rem;
+  min-height: 60px;
+  padding: .9rem 1rem;
   border-radius: 10px;
   margin-bottom: .35rem;
 }
 section[data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"] p {
-  font-size: 1.05rem !important;
+  font-size: 1.18rem !important;
   font-weight: 700 !important;
   line-height: 1.3;
 }
 section[data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"] span {
-  font-size: 1.15rem !important;
+  font-size: 1.3rem !important;
 }
 
 /* V2.2 적극매수 종목명 점멸 */
@@ -420,8 +420,8 @@ div[data-testid="stMetric"] {border: 1px solid rgba(128,128,128,.18); padding: .
 div[data-testid="stDataFrame"] {font-size: 0.88rem;}
 @media (max-width: 768px) {
   section[data-testid="stSidebar"] {
-    min-width: 245px !important;
-    max-width: 245px !important;
+    min-width: 275px !important;
+    max-width: 275px !important;
   }
   .block-container {padding-left: .55rem; padding-right: .55rem; padding-top: .55rem;}
   h1 {font-size: 1.55rem !important; line-height: 1.2;}
