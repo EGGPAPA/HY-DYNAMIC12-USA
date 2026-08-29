@@ -414,7 +414,7 @@ if st.session_state.get("usa_full_update_at"):st.caption(f"마지막 업데이�
 
 
 def render_usa_top12_blink(top):
-    """적극매수 종목만 초록 점 + 종목명이 부드럽게 점멸하는 USA TOP12 핵심표."""
+    """TOP12 점수 순위표. 매수 행동 표시는 아래 종합평가에서만 결정한다."""
     if not top:
         return
 
@@ -438,13 +438,9 @@ def render_usa_top12_blink(top):
 
     for r in top[:12]:
         raw_j=str(r.get("판정",""))
-        active=raw_j.startswith("적극매수")
         name=esc(r.get("종목",""))
         ticker=esc(r.get("티커",""))
-        if active:
-            name_html=f'<span class="hy-active-dot">●</span><span class="hy-active-name">{name}</span>'
-        else:
-            name_html=f'<span class="hy-normal-name">{name}</span>'
+        name_html=f'<span class="hy-normal-name">{name}</span>'
 
         usa=float(r.get("USA점수",0) or 0)
         jscore=float(r.get("판정점수",usa) or 0)
@@ -460,13 +456,13 @@ def render_usa_top12_blink(top):
         )
 
         if raw_j.startswith("적극매수"):
-            badge="🟢 적극매수"
+            badge="🟣 TOP12 점수상위"
         elif raw_j.startswith("매수후보"):
-            badge="🟡 매수후보"
+            badge="🔵 TOP12 점수후보"
         elif raw_j.startswith("관찰"):
-            badge="🔵 관찰"
+            badge="⚪ TOP12 관찰"
         elif raw_j.startswith("현금대기"):
-            badge="⚪ 현금대기"
+            badge="⚪ TOP12 대기"
         else:
             badge=esc(raw_j)
 
@@ -486,11 +482,7 @@ def render_usa_top12_blink(top):
 
     out.append("</tbody></table></div>")
     st.markdown("".join(out),unsafe_allow_html=True)
-    st.markdown(
-        '<div class="hy-help">🟢 적극매수 종목만 <b>초록 점 + 종목명</b>이 약 1.35초 주기로 부드럽게 점멸합니다. '
-        '매수후보·관찰·현금대기는 정적으로 표시됩니다.</div>',
-        unsafe_allow_html=True
-    )
+    st.warning("TOP12는 점수 순위표이며 매수 신호가 아닙니다. 실제 진입 여부는 아래 ‘USA 통합 종합평가’의 조기포착·매수검토·과열 판정을 따르세요.")
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -951,15 +943,15 @@ with tabs[1]:
                     st.error(str(e))
     else:
         c1,c2,c3,c4=st.columns(4)
-        c1.metric("오늘 1위",top[0]["티커"])
+        c1.metric("TOP12 점수 1위",top[0]["티커"])
         c2.metric("USA점수",top[0]["USA점수"])
-        c3.metric("진입후보",sum(str(x.get("판정","")).startswith(("적극매수","매수후보")) for x in top))
-        c4.metric("운용원칙","최대 6종목")
-        buy=[x for x in top if str(x.get("판정","")).startswith("적극매수")]
-        if buy:
-            st.success("우선 진입후보: "+", ".join(x["티커"] for x in buy))
+        c3.metric("TOP12 점수후보",sum(str(x.get("판정","")).startswith(("적극매수","매수후보")) for x in top))
+        c4.metric("행동판정","아래 종합평가")
+        score_candidates=[x for x in top if str(x.get("판정","")).startswith(("적극매수","매수후보"))]
+        if score_candidates:
+            st.info("TOP12 단독 관심종목: "+", ".join(x["티커"] for x in score_candidates[:6])+" · 아래 종합평가 통과 전 매수 금지")
         else:
-            st.warning("TOP12 안에도 적극매수/매수후보 없음 — 현금대기")
+            st.info("현재 TOP12 점수 관심종목 없음 · 아래 종합평가를 확인하세요.")
 
         if st.button("🔄 오늘 TOP12 다시 계산",use_container_width=True):
             import yfinance as yf
