@@ -553,20 +553,19 @@ def render_usa_leader_entry_panel():
     first=sector_chart.iloc[0]
     st.success(f"현재 1위 주도업종: {first['업종']} · {first['주도점수']:.1f}점 · 대표종목 {first['대표종목'] or '-'}")
     st.markdown("**업종별 주도점수 · 대표종목**")
-    sector_chart["업종·대표종목"]=sector_chart.apply(
-        lambda row:f"{row['업종']} · {row['대표종목'] or '-'}",axis=1
+    sector_order=sector_chart["업종"].tolist()
+    state_color=alt.Color(
+        "상태:N",
+        scale=alt.Scale(
+            domain=["🚀 주도","🟢 확산","🔵 중립","🟠 둔화","🔴 이탈"],
+            range=["#38bdf8","#60a5fa","#64748b","#f59e0b","#ef4444"],
+        ),
+        legend=None,
     )
     base=alt.Chart(sector_chart).encode(
-        y=alt.Y("업종·대표종목:N",sort="-x",title=None,axis=alt.Axis(labelLimit=260,labelFontSize=12)),
+        y=alt.Y("업종:N",sort=sector_order,title=None,axis=alt.Axis(labelLimit=130,labelFontSize=12)),
         x=alt.X("주도점수:Q",scale=alt.Scale(domain=[0,100]),title="주도점수"),
-        color=alt.Color(
-            "상태:N",
-            scale=alt.Scale(
-                domain=["🚀 주도","🟢 확산","🔵 중립","🟠 둔화","🔴 이탈"],
-                range=["#38bdf8","#60a5fa","#64748b","#f59e0b","#ef4444"],
-            ),
-            legend=None,
-        ),
+        color=state_color,
         tooltip=[
             alt.Tooltip("업종:N"),alt.Tooltip("상태:N"),alt.Tooltip("주도점수:Q",format=".1f"),
             alt.Tooltip("상승확산(%):Q",format=".1f"),alt.Tooltip("20일 수익률(%):Q",format=".1f"),
@@ -575,10 +574,22 @@ def render_usa_leader_entry_panel():
         ],
     )
     bars=base.mark_bar(cornerRadiusEnd=4,height=14)
-    labels=base.mark_text(align="left",baseline="middle",dx=5,color="#e5e7eb").encode(
+    scores=base.mark_text(align="left",baseline="middle",dx=5,color="#e5e7eb").encode(
         text=alt.Text("주도점수:Q",format=".1f")
     )
-    st.altair_chart((bars+labels).properties(height=alt.Step(24)),use_container_width=True)
+    stock_labels=alt.Chart(sector_chart).mark_text(
+        align="left",baseline="middle",fontSize=12,color="#e5e7eb"
+    ).encode(
+        y=alt.Y("업종:N",sort=sector_order,title=None,axis=None),
+        text=alt.Text("대표종목:N"),
+        tooltip=[alt.Tooltip("업종:N"),alt.Tooltip("대표종목:N"),alt.Tooltip("상태:N")],
+    ).properties(width=190,height=alt.Step(24),title="대표종목")
+    compact_chart=alt.hconcat(
+        (bars+scores).properties(width=620,height=alt.Step(24)),
+        stock_labels,
+        spacing=10,
+    ).resolve_scale(y="shared")
+    st.altair_chart(compact_chart,use_container_width=True)
     st.caption("막대에 업종과 대표종목을 함께 표시했습니다. 마우스를 올리면 상승확산·20/60일 수익률·거래량을 확인할 수 있습니다.")
 
 def render_usa_integrated_buy_panel(top):
