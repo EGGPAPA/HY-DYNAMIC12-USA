@@ -593,8 +593,8 @@ def render_usa_leader_entry_panel():
     st.caption("막대에 업종과 대표종목을 함께 표시했습니다. 마우스를 올리면 상승확산·20/60일 수익률·거래량을 확인할 수 있습니다.")
 
 def render_usa_integrated_buy_panel(top):
-    st.subheader("🎯 USA 통합 매수판정")
-    st.caption("USA TOP12 · 부의 점프 · 월봉 5개월선 · 주도업종을 교차 확인합니다. 주도업종 4조건 충족만으로는 매수하지 않습니다.")
+    st.subheader("🎯 USA 통합 종합평가")
+    st.caption("TOP12 · 부의 점프 · 월봉 5개월선 · 주도업종을 합산합니다. 5개월선 -3% 이내 접근은 0.5점으로 먼저 포착하고, 과열 종목은 눌림 대기로 전환합니다.")
     if not top:
         st.info("USA TOP12가 없습니다. 먼저 정밀 전체 업데이트를 실행하세요.");return
     try:sectors=usa_leader_entry_conditions()
@@ -607,77 +607,117 @@ def render_usa_integrated_buy_panel(top):
         ticker=str(row.get("티커",""));score=float(row.get("USA점수",0) or 0);leader=float(row.get("주도주",0) or 0);technical=float(row.get("기술",0) or 0);fundamental=float(row.get("재무",0) or 0)
         top_ok=True
         wealth_ok=score>=75 and leader>=70 and technical>=55 and fundamental>=50
-        ma=ma_map.get(ticker,{});ma_ok=bool(ma) and ma.get("판정")!="⚪ 제외" and float(ma.get("돌파율(%)",-999) or -999)>0
+        wealth_near=(not wealth_ok) and score>=70 and leader>=65 and technical>=50 and fundamental>=45
+        wealth_point=1.0 if wealth_ok else (0.5 if wealth_near else 0.0)
+        ma=ma_map.get(ticker,{})
+        ma_rate=float(ma.get("돌파율(%)",-999) or -999) if ma else -999
+        ma_valid=bool(ma) and ma.get("판정")!="⚪ 제외"
+        ma_ok=ma_valid and ma_rate>=0
+        ma_near=ma_valid and -3<=ma_rate<0
+        ma_point=1.0 if ma_ok else (0.5 if ma_near else 0.0)
         sector=sector_map.get(ticker,{});sector_ok=bool(sector.get("ready"))
-        checks={"TOP12":top_ok,"부의 점프":wealth_ok,"5개월선":ma_ok,"주도업종":sector_ok}
-        count=sum(checks.values())
-        missing=" · ".join(name for name,ok in checks.items() if not ok) or "없음"
-        if count==4:decision="🟢 적극매수 검토";action="1차 20~30% 분할매수"
-        elif count==3 and (top_ok or wealth_ok):decision="🟢 1차매수 검토";action="1차 10~20% · 눌림 확인"
-        elif count==2:decision="🟡 관찰·눌림대기";action="신호 1개 추가 확인"
-        else:decision="⚪ 매수보류";action="단독 신호로 매수 금지"
-        results.append({"종합순위":0,"종목":row.get("종목"),"티커":ticker,"현재가($)":row.get("현재가($)"),"TOP12":"✅" if top_ok else "-","부의점프":"✅" if wealth_ok else "대기","5개월선":"✅" if ma_ok else "대기","주도업종":"✅" if sector_ok else "대기","교차포착":f"{count}/4","부족조건":missing,"통합판정":decision,"행동":action,"1차매수가($)":row.get("1차매수가($)"),"2차매수가($)":row.get("2차매수가($)"),"업종":sector.get("sector","-")})
-    results.sort(key=lambda x:(int(x["교차포착"].split("/")[0]),float(next((r.get("USA점수",0) for r in top if r.get("티커")==x["티커"]),0) or 0)),reverse=True)
+        total=1.0+wealth_point+ma_point+float(sector_ok)
+        current=float(row.get("현재가($)",0) or 0)
+        entry1=float(row.get("1차매수가($)",0) or 0)
+        overheat=(ma_ok and ma_rate>=7) or (entry1>0 and current>=entry1*1.08)
+        if ma_ok:ma_label="✅ 돌파"
+        elif ma_near:ma_label=f"△ 접근 {ma_rate:.1f}%"
+        else:ma_label="대기"
+        wealth_label="✅" if wealth_ok else ("△ 점수접근" if wealth_near else "대기")
+        missing=[]
+        if not wealth_ok:missing.append("부의 점프 기준 접근" if wealth_near else "부의 점프")
+        if not ma_ok:
+            missing.append("5개월선 돌파 직전" if ma_near else "5개월선")
+        if not sector_ok:missing.append("주도업종")
+        missing_text=" · ".join(missing) or "없음"
+        point_text=f"{total:g}/4"
+        if overheat and total>=2.5:
+            decision="🟠 과열·눌림대기";action="추격 금지 · 눌림 지지 확인"
+        elif total>=4:
+            decision="🟢 강한 매수 검토";action="눌림 확인 후 1차 20~30% 분할"
+        elif total>=3:
+            decision="🟢 1차 매수 검토";action="눌림 확인 후 1차 10~20%"
+        elif total>=2.5:
+            decision="🟡 조기 포착";action="매수확정 아님 · 돌파 또는 눌림 관찰"
+        elif total>=2:
+            decision="🟡 관찰";action="신호 1개 추가 확인"
+        else:
+            decision="⚪ 매수보류";action="단독 신호로 매수 금지"
+        results.append({
+            "종합순위":0,"종목":row.get("종목"),"티커":ticker,"현재가($)":row.get("현재가($)"),
+            "TOP12":"✅","부의점프":wealth_label,"5개월선":ma_label,
+            "주도업종":"✅" if sector_ok else "대기","종합점수":point_text,"점수값":total,
+            "부족조건":missing_text,"과열":"⚠️" if overheat else "-","종합판정":decision,"행동":action,
+            "1차매수가($)":row.get("1차매수가($)"),"2차매수가($)":row.get("2차매수가($)"),
+            "업종":sector.get("sector","-"),
+        })
+    results.sort(key=lambda x:(x["점수값"],float(next((r.get("USA점수",0) for r in top if r.get("티커")==x["티커"]),0) or 0)),reverse=True)
     for i,row in enumerate(results,1):row["종합순위"]=i
-    buy=[x for x in results if x["통합판정"].startswith("🟢")]
-    a,b,c,d=st.columns(4);a.metric("4/4 강한포착",sum(x["교차포착"]=="4/4" for x in results));b.metric("3/4 후보",sum(x["교차포착"]=="3/4" for x in results));c.metric("오늘 매수검토",len(buy));d.metric("단독 업종신호","매수 금지")
+    early=[x for x in results if x["종합판정"]=="🟡 조기 포착"]
+    buy=[x for x in results if x["종합판정"].startswith("🟢")]
+    overheated=[x for x in results if x["종합판정"].startswith("🟠")]
+    alerts=early+buy
+    a,b,c,d=st.columns(4)
+    a.metric("4/4 강한포착",sum(x["점수값"]=="4/4" and x["종합판정"].startswith("🟢") for x in results))
+    b.metric("2.5~3.5 조기·매수",len(alerts))
+    c.metric("오늘 매수검토",len(buy))
+    d.metric("과열·눌림대기",len(overheated))
     if buy:
-        st.success("오늘 통합 매수검토: "+", ".join(f"{x['티커']}({x['교차포착']})" for x in buy[:4]))
-    else:
-        best_count=max(int(x["교차포착"].split("/")[0]) for x in results)
-        nearest=[x for x in results if int(x["교차포착"].split("/")[0])==best_count]
-        nearest_text=", ".join(
-            f"{x['티커']}({x['교차포착']} · 부족: {x['부족조건']})" for x in nearest[:4]
-        )
-        st.info(f"현재 매수검토 종목은 없습니다. 가장 가까운 후보: {nearest_text}")
-    st.dataframe(pd.DataFrame(results),use_container_width=True,hide_index=True)
+        st.success("오늘 통합 매수검토: "+", ".join(f"{x['티커']}({x['종합점수']})" for x in buy[:4]))
+    if early:
+        st.info("조기 포착(매수확정 아님): "+", ".join(f"{x['티커']}({x['종합점수']})" for x in early[:4]))
+    if overheated:
+        st.warning("추격 금지·눌림대기: "+", ".join(f"{x['티커']}({x['종합점수']})" for x in overheated[:4]))
+    if not alerts and not overheated:
+        best=max(x["점수값"] for x in results)
+        nearest=[x for x in results if x["점수값"]==best]
+        nearest_text=", ".join(f"{x['티커']}({x['종합점수']} · 부족: {x['부족조건']})" for x in nearest[:4])
+        st.info(f"현재 조기 포착·매수검토 종목은 없습니다. 가장 가까운 후보: {nearest_text}")
+    view=pd.DataFrame(results).drop(columns=["점수값"],errors="ignore")
+    st.dataframe(view,use_container_width=True,hide_index=True)
 
-    st.markdown("#### 카카오 통합 매수판정 알림")
+    st.markdown("#### 카카오 종합평가 알림")
     kakao_ready=bool(KAKAO_REST_API_KEY and KAKAO_REFRESH_TOKEN)
     k1,k2,k3=st.columns([1,1,1.4])
     k1.metric("카카오 연결","✅ 준비됨" if kakao_ready else "⚠️ 설정 필요")
-    k2.metric("현재 통합 신호",f"{len(buy)}종목")
+    k2.metric("현재 종합 신호",f"{len(alerts)}종목")
     auto=k3.toggle(
-        "3/4·4/4 신규충족 시 자동알림",
-        value=True,
-        disabled=not kakao_ready,
-        key="usa_integrated_kakao_auto",
+        "2.5/4 조기포착·3/4 이상 신규충족 시 자동알림",
+        value=True,disabled=not kakao_ready,key="usa_integrated_kakao_auto",
     )
     alert_time=datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d %H:%M KST")
     message_lines=[
-        "[HY DYNAMIC12 USA 통합 매수판정]",
+        "[HY DYNAMIC12 USA 종합평가]",
         f"판정시각: {alert_time}",
-        "알림기준: 통합조건 3/4 또는 4/4 충족",
+        "알림기준: 조기포착 2.5/4 이상 · 과열 제외",
         "",
     ]
-    for x in buy:
+    for x in alerts:
         satisfied=", ".join(
             name for name,column in [
                 ("TOP12","TOP12"),("부의 점프","부의점프"),
                 ("5개월선","5개월선"),("주도업종","주도업종"),
-            ] if x.get(column)=="✅"
+            ] if str(x.get(column,"")).startswith(("✅","△"))
         ) or "없음"
         message_lines.extend([
-            f"{x['티커']} | 조건 {x['교차포착']} 충족",
-            f"판정: {x['통합판정']}",
-            f"충족: {satisfied}",
+            f"{x['티커']} | 종합 {x['종합점수']}",
+            f"판정: {x['종합판정']}",
+            f"충족·접근: {satisfied}",
+            f"5개월선: {x['5개월선']}",
             f"부족: {x['부족조건']}",
             f"행동: {x['행동']}",
             "",
         ])
-    if not buy:
-        message_lines.append("현재 통합 매수검토 종목 없음")
-    message_lines.append("※ 신호는 실시간으로 변하므로 현재 앱 화면과 달라질 수 있습니다.")
+    if not alerts:message_lines.append("현재 조기 포착·매수검토 종목 없음")
+    message_lines.append("※ 조기 포착은 매수확정이 아니며, 신호는 실시간으로 변할 수 있습니다.")
     message="\n".join(message_lines)
     if st.button(
-        "📨 현재 통합 신호 카카오 알림 보내기",
-        disabled=not kakao_ready or not buy,
-        use_container_width=True,
-        key="usa_integrated_kakao_manual",
+        "📨 현재 종합 신호 카카오 알림 보내기",
+        disabled=not kakao_ready or not alerts,use_container_width=True,key="usa_integrated_kakao_manual",
     ):
-        try:kakao_send_to_me(message);st.success("통합 매수판정 알림을 보냈습니다.")
+        try:kakao_send_to_me(message);st.success("종합평가 알림을 보냈습니다.")
         except Exception as e:st.error(str(e))
-    signature="|".join(sorted(f"{x['티커']}:{x['교차포착']}" for x in buy))
+    signature="|".join(sorted(f"{x['티커']}:{x['종합점수']}:{x['종합판정']}" for x in alerts))
     alert_date=datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
     alert_key=f"{alert_date}|{signature}" if signature else ""
     kakao_state=_kakao_load_state()
@@ -688,10 +728,10 @@ def render_usa_integrated_buy_panel(top):
             sent_integrated.append(alert_key)
             kakao_state["integrated_alert_keys"]=sent_integrated[-100:]
             _kakao_save_state(kakao_state)
-            st.success("새 통합 매수판정 종목을 카카오로 보냈습니다.")
+            st.success("새 종합평가 종목을 카카오로 보냈습니다.")
         except Exception as e:st.warning(str(e))
-    st.caption("카카오 최종 알림은 USA 통합판정 3/4 또는 4/4 종목에만 발송됩니다.")
-    if not ma_rows:st.warning("5개월선 결과가 없습니다. 빠른 또는 정밀 전체 업데이트를 실행해야 완전한 통합판정이 가능합니다.")
+    st.caption("카카오는 조기 포착 2.5/4 이상 또는 매수검토 종목만 발송하며, 과열 종목은 제외합니다.")
+    if not ma_rows:st.warning("5개월선 결과가 없습니다. 빠른 또는 정밀 전체 업데이트를 실행해야 완전한 종합평가가 가능합니다.")
 
 
 tabs=st.tabs(["🔎 전체시장 분석","🏆 USA TOP12","🚀 부의 점프","🔥 현재 5개월선 돌파","📈 과거 성과 검증","💰 자금관리","📋 전략 규칙","⚙️ KIS 설정","🔔 카카오"])
