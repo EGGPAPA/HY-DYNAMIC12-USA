@@ -593,8 +593,11 @@ def render_usa_leader_entry_panel():
     st.caption("막대에 업종과 대표종목을 함께 표시했습니다. 마우스를 올리면 상승확산·20/60일 수익률·거래량을 확인할 수 있습니다.")
 
 def render_usa_integrated_buy_panel(top):
-    st.subheader("🎯 USA 통합 종합평가")
-    st.caption("TOP12 · 부의 점프 · 월봉 5개월선 · 주도업종을 합산합니다. 5개월선 -3% 이내 접근은 0.5점으로 먼저 포착하고, 과열 종목은 눌림 대기로 전환합니다.")
+    title_col,kakao_col=st.columns([3.4,1],gap="large")
+    with title_col:
+        st.subheader("🎯 USA 통합 종합평가")
+        st.caption("TOP12 · 부의 점프 · 월봉 5개월선 · 주도업종을 합산합니다. 5개월선 -3% 이내 접근은 0.5점으로 먼저 포착하고, 과열 종목은 눌림 대기로 전환합니다.")
+    kakao_slot=kakao_col.container(border=True)
     if not top:
         st.info("USA TOP12가 없습니다. 먼저 정밀 전체 업데이트를 실행하세요.");return
     try:sectors=usa_leader_entry_conditions()
@@ -676,15 +679,15 @@ def render_usa_integrated_buy_panel(top):
     view=pd.DataFrame(results).drop(columns=["점수값"],errors="ignore")
     st.dataframe(view,use_container_width=True,hide_index=True)
 
-    st.markdown("#### 카카오 종합평가 알림")
     kakao_ready=bool(KAKAO_REST_API_KEY and KAKAO_REFRESH_TOKEN)
-    k1,k2,k3=st.columns([1,1,1.4])
-    k1.metric("카카오 연결","✅ 준비됨" if kakao_ready else "⚠️ 설정 필요")
-    k2.metric("현재 종합 신호",f"{len(alerts)}종목")
-    auto=k3.toggle(
-        "2.5/4 조기포착·3/4 이상 신규충족 시 자동알림",
-        value=True,disabled=not kakao_ready,key="usa_integrated_kakao_auto",
-    )
+    with kakao_slot:
+        st.markdown("##### 🔔 카카오 알림")
+        st.caption(("✅ 연결됨" if kakao_ready else "⚠️ 설정 필요")+f" · 현재 신호 {len(alerts)}종목")
+        auto=st.toggle(
+            "종합평가 자동알림",
+            value=True,disabled=not kakao_ready,key="usa_integrated_kakao_auto",
+            help="2.5/4 조기 포착 또는 3/4 이상 신규 신호를 하루 한 번 전송합니다.",
+        )
     alert_time=datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d %H:%M KST")
     message_lines=[
         "[HY DYNAMIC12 USA 종합평가]",
@@ -711,12 +714,14 @@ def render_usa_integrated_buy_panel(top):
     if not alerts:message_lines.append("현재 조기 포착·매수검토 종목 없음")
     message_lines.append("※ 조기 포착은 매수확정이 아니며, 신호는 실시간으로 변할 수 있습니다.")
     message="\n".join(message_lines)
-    if st.button(
-        "📨 현재 종합 신호 카카오 알림 보내기",
-        disabled=not kakao_ready or not alerts,use_container_width=True,key="usa_integrated_kakao_manual",
-    ):
-        try:kakao_send_to_me(message);st.success("종합평가 알림을 보냈습니다.")
-        except Exception as e:st.error(str(e))
+    with kakao_slot:
+        if st.button(
+            "📨 현재 신호 보내기",disabled=not kakao_ready or not alerts,
+            use_container_width=True,key="usa_integrated_kakao_manual",
+        ):
+            try:kakao_send_to_me(message);st.success("전송 완료")
+            except Exception as e:st.error(str(e))
+        st.caption("과열 종목 제외 · 동일 신호 하루 1회")
     signature="|".join(sorted(f"{x['티커']}:{x['종합점수']}:{x['종합판정']}" for x in alerts))
     alert_date=datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
     alert_key=f"{alert_date}|{signature}" if signature else ""
@@ -728,9 +733,9 @@ def render_usa_integrated_buy_panel(top):
             sent_integrated.append(alert_key)
             kakao_state["integrated_alert_keys"]=sent_integrated[-100:]
             _kakao_save_state(kakao_state)
-            st.success("새 종합평가 종목을 카카오로 보냈습니다.")
-        except Exception as e:st.warning(str(e))
-    st.caption("카카오는 조기 포착 2.5/4 이상 또는 매수검토 종목만 발송하며, 과열 종목은 제외합니다.")
+            with kakao_slot:st.success("새 신호 전송 완료")
+        except Exception as e:
+            with kakao_slot:st.warning(str(e))
     if not ma_rows:st.warning("5개월선 결과가 없습니다. 빠른 또는 정밀 전체 업데이트를 실행해야 완전한 종합평가가 가능합니다.")
 
 
