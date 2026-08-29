@@ -3,6 +3,7 @@ import streamlit as st
 from holdings_ui import install_holdings_tab
 install_holdings_tab()
 import pandas as pd
+import altair as alt
 from config import settings,save
 from kis_us import KISUS, yf_daily, yf_price, yf_info_safe
 from rank_us import USScanner
@@ -551,17 +552,34 @@ def render_usa_leader_entry_panel():
     } for s in sectors]).sort_values("주도점수",ascending=False).reset_index(drop=True)
     first=sector_chart.iloc[0]
     st.success(f"현재 1위 주도업종: {first['업종']} · {first['주도점수']:.1f}점 · 대표종목 {first['대표종목'] or '-'}")
-    st.markdown("**업종별 주도점수 비교**")
-    st.bar_chart(sector_chart.set_index("업종")[["주도점수"]],height=350)
-    st.dataframe(
-        sector_chart[["업종","상태","주도점수","상승확산(%)","20일 수익률(%)","60일 수익률(%)","거래량배수","대표종목"]],
-        use_container_width=True,hide_index=True,height=460,
-        column_config={
-            "주도점수":st.column_config.ProgressColumn("주도점수",min_value=0,max_value=100,format="%.1f"),
-            "상승확산(%)":st.column_config.ProgressColumn("상승확산",min_value=0,max_value=100,format="%.1f%%"),
-        },
+    st.markdown("**업종별 주도점수 · 대표종목**")
+    sector_chart["업종·대표종목"]=sector_chart.apply(
+        lambda row:f"{row['업종']} · {row['대표종목'] or '-'}",axis=1
     )
-    st.caption("상태 기준: 주도 → 확산 → 중립 → 둔화 → 이탈. 대표종목은 해당 업종 안에서 추세·상대강도·거래량 점수가 높은 최대 3종목입니다.")
+    base=alt.Chart(sector_chart).encode(
+        y=alt.Y("업종·대표종목:N",sort="-x",title=None,axis=alt.Axis(labelLimit=260,labelFontSize=12)),
+        x=alt.X("주도점수:Q",scale=alt.Scale(domain=[0,100]),title="주도점수"),
+        color=alt.Color(
+            "상태:N",
+            scale=alt.Scale(
+                domain=["🚀 주도","🟢 확산","🔵 중립","🟠 둔화","🔴 이탈"],
+                range=["#38bdf8","#60a5fa","#64748b","#f59e0b","#ef4444"],
+            ),
+            legend=None,
+        ),
+        tooltip=[
+            alt.Tooltip("업종:N"),alt.Tooltip("상태:N"),alt.Tooltip("주도점수:Q",format=".1f"),
+            alt.Tooltip("상승확산(%):Q",format=".1f"),alt.Tooltip("20일 수익률(%):Q",format=".1f"),
+            alt.Tooltip("60일 수익률(%):Q",format=".1f"),alt.Tooltip("거래량배수:Q",format=".2f"),
+            alt.Tooltip("대표종목:N"),
+        ],
+    )
+    bars=base.mark_bar(cornerRadiusEnd=4,height=14)
+    labels=base.mark_text(align="left",baseline="middle",dx=5,color="#e5e7eb").encode(
+        text=alt.Text("주도점수:Q",format=".1f")
+    )
+    st.altair_chart((bars+labels).properties(height=alt.Step(24)),use_container_width=True)
+    st.caption("막대에 업종과 대표종목을 함께 표시했습니다. 마우스를 올리면 상승확산·20/60일 수익률·거래량을 확인할 수 있습니다.")
 
 def render_usa_integrated_buy_panel(top):
     st.subheader("🎯 USA 통합 매수판정")
