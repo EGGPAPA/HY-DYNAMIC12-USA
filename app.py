@@ -643,12 +643,32 @@ def render_usa_integrated_buy_panel(top):
         disabled=not kakao_ready,
         key="usa_integrated_kakao_auto",
     )
-    message="[HY DYNAMIC12 USA 통합 매수판정]\n"+(
-        "\n".join(
-            f"{x['티커']} · {x['교차포착']} · {x['통합판정']} · {x['행동']}"
-            for x in buy
-        ) if buy else "현재 통합 매수검토 종목 없음"
-    )
+    alert_time=datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d %H:%M KST")
+    message_lines=[
+        "[HY DYNAMIC12 USA 통합 매수판정]",
+        f"판정시각: {alert_time}",
+        "알림기준: 통합조건 3/4 또는 4/4 충족",
+        "",
+    ]
+    for x in buy:
+        satisfied=", ".join(
+            name for name,column in [
+                ("TOP12","TOP12"),("부의 점프","부의점프"),
+                ("5개월선","5개월선"),("주도업종","주도업종"),
+            ] if x.get(column)=="✅"
+        ) or "없음"
+        message_lines.extend([
+            f"{x['티커']} | 조건 {x['교차포착']} 충족",
+            f"판정: {x['통합판정']}",
+            f"충족: {satisfied}",
+            f"부족: {x['부족조건']}",
+            f"행동: {x['행동']}",
+            "",
+        ])
+    if not buy:
+        message_lines.append("현재 통합 매수검토 종목 없음")
+    message_lines.append("※ 신호는 실시간으로 변하므로 현재 앱 화면과 달라질 수 있습니다.")
+    message="\n".join(message_lines)
     if st.button(
         "📨 현재 통합 신호 카카오 알림 보내기",
         disabled=not kakao_ready or not buy,
@@ -658,10 +678,16 @@ def render_usa_integrated_buy_panel(top):
         try:kakao_send_to_me(message);st.success("통합 매수판정 알림을 보냈습니다.")
         except Exception as e:st.error(str(e))
     signature="|".join(sorted(f"{x['티커']}:{x['교차포착']}" for x in buy))
-    if auto and kakao_ready and signature and st.session_state.get("usa_integrated_alert_signature")!=signature:
+    alert_date=datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
+    alert_key=f"{alert_date}|{signature}" if signature else ""
+    kakao_state=_kakao_load_state()
+    sent_integrated=list(kakao_state.get("integrated_alert_keys",[]))
+    if auto and kakao_ready and alert_key and alert_key not in sent_integrated:
         try:
             kakao_send_to_me(message)
-            st.session_state["usa_integrated_alert_signature"]=signature
+            sent_integrated.append(alert_key)
+            kakao_state["integrated_alert_keys"]=sent_integrated[-100:]
+            _kakao_save_state(kakao_state)
             st.success("새 통합 매수판정 종목을 카카오로 보냈습니다.")
         except Exception as e:st.warning(str(e))
     st.caption("카카오 최종 알림은 USA 통합판정 3/4 또는 4/4 종목에만 발송됩니다.")
