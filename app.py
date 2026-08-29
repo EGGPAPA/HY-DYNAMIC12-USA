@@ -495,7 +495,7 @@ def render_usa_top12_blink(top):
 @st.cache_data(ttl=600, show_spinner=False)
 def usa_leader_entry_conditions(cache_version="sector-duration-v2"):
     """강한 업종을 먼저 찾고 업종별 대표 주도주 2~3개를 반환합니다."""
-    sectors=scan_sector_leaders(max_sectors=5,representatives=3)
+    sectors=scan_sector_leaders(max_sectors=12,representatives=3)
     for sector in sectors:
         confirmed=sector.get("evaluation")=="🟢 주도업종"
         for row in sector.get("representatives",[]):
@@ -528,11 +528,45 @@ def render_usa_leader_entry_panel():
     try:sectors=usa_leader_entry_conditions()
     except Exception as e:st.warning(f"주도 업종을 불러오지 못했습니다: {e}");return
     if not sectors:st.info("현재 평가 가능한 미국 업종이 없습니다.");return
-    tickers=[x["ticker"] for s in sectors for x in s.get("representatives",[])]
+    sector_chart=pd.DataFrame([{
+        "업종":s["sector"],
+        "주도점수":round(float(s.get("score",0)),1),
+        "상승확산(%)":round(float(s.get("breadth",0)),1),
+        "20일 수익률(%)":round(float(s.get("return20",0)),1),
+        "60일 수익률(%)":round(float(s.get("return60",0)),1),
+        "거래량배수":round(float(s.get("volume_ratio",0)),2),
+        "상태":(
+            "🚀 주도" if float(s.get("score",0))>=70 and float(s.get("breadth",0))>=60
+            else "🟢 확산" if float(s.get("score",0))>=60 and float(s.get("breadth",0))>=55
+            else "🔵 중립" if float(s.get("score",0))>=50
+            else "🟠 둔화" if float(s.get("score",0))>=35
+            else "🔴 이탈"
+        ),
+        "대표종목":", ".join(x.get("ticker","") for x in s.get("representatives",[])),
+    } for s in sectors]).sort_values("주도점수",ascending=False)
+    st.markdown("#### 📊 미국 주도업종 비교")
+    st.caption("미국 업종끼리 비교합니다. 주도점수는 추세·20/60일 상대강도·상승 확산·거래량을 합산한 0~100점입니다.")
+    chart_left,chart_right=st.columns(2)
+    with chart_left:
+        st.markdown("**주도점수와 상승 확산**")
+        st.bar_chart(sector_chart.set_index("업종")[["주도점수","상승확산(%)"]],height=360)
+    with chart_right:
+        st.markdown("**20일·60일 업종 수익률**")
+        st.bar_chart(sector_chart.set_index("업종")[["20일 수익률(%)","60일 수익률(%)"]],height=360)
+    st.dataframe(
+        sector_chart[["업종","상태","주도점수","상승확산(%)","20일 수익률(%)","60일 수익률(%)","거래량배수","대표종목"]],
+        use_container_width=True,hide_index=True,
+        column_config={
+            "주도점수":st.column_config.ProgressColumn("주도점수",min_value=0,max_value=100,format="%.1f"),
+            "상승확산(%)":st.column_config.ProgressColumn("상승확산",min_value=0,max_value=100,format="%.1f%%"),
+        },
+    )
+    leader_sectors=sectors[:5]
+    tickers=[x["ticker"] for s in leader_sectors for x in s.get("representatives",[])]
     saved_top=load_json(TOP12_FILE,[])
     top_tickers={str(row.get("티커","")).strip().upper() for row in saved_top[:12]}
     prices=_usa_live_prices(tuple(tickers));rows=[]
-    for s in sectors:
+    for s in leader_sectors:
         evaluation=s.get("evaluation","🔵 중립")
         for x0 in s.get("representatives",[]):
             x=dict(x0);price=float(prices.get(x["ticker"],x["price"]));observation=float(x["observation"]);ma20=float(x["ma20"]);invalidation=float(x["invalidation"])
