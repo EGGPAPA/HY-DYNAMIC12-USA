@@ -25,6 +25,7 @@ import requests
 import html
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from monthly_breakout_ui import render_monthly_breakout_tab, scan_monthly_breakouts
 from usa_backtest_ui import render_usa_backtest_tab
 
@@ -225,20 +226,32 @@ def usa_market_snapshot():
 
 def analyze_candidate_frame(cand,limit=None,progress=None,message=None):
     if cand is None or cand.empty:return [],{}
-    work=cand.head(min(int(limit or len(cand)),len(cand)));rows=[];details={};errors=[];recs=work.to_dict("records")
-    for i,r in enumerate(recs):
+    work=cand.head(min(int(limit or len(cand)),len(cand)))
+    recs=work.to_dict("records");rows=[];details={};errors=[]
+
+    def analyze_one(r):
         sym=r["symbol"];excd=r["exchange"]
-        if message is not None:message.write(f"⏳ {i+1}/{len(recs)} · {sym} 정밀분석")
         try:
-            d=yf_daily(sym);a=analyze(d);lm=leader_metrics(d);px=yf_price(sym,d);pdeta={"last":px,"source":"yfinance"};fn=score_yf(cached_yf_info(sym))
+            d=yf_daily(sym);a=analyze(d);lm=leader_metrics(d);px=yf_price(sym,d)
+            pdeta={"last":px,"source":"yfinance"};fn=score_yf(cached_yf_info(sym))
             final=round(lm["leader_score"]*.35+a["score"]*.25+r["pre_score"]*.15+min(100,a["value_ratio"]*50)*.10+fn["fund_score"]*.15,1)
             signal="적극매수" if final>=85 else ("매수후보" if final>=75 else ("관찰" if final>=65 else "현금대기"))
             if lm["near_high"]>=98 and a["gap"]>6:signal="관찰"
             px=float(pdeta.get("last",d.iloc[-1].close) or d.iloc[-1].close);avg=round((a["entry"]+a["entry2"])/2,2)
-            rows.append({"순위":0,"종목":r["name"],"티커":sym,"거래소":excd,"포착경로":r["sources"],"현재가($)":round(px,2),"USA점수":final,"주도주":lm["leader_score"],"기술":a["score"],"재무":fn["fund_score"],"20일RS(%)":lm["rs20"],"60일RS(%)":lm["rs60"],"120일고점대비(%)":lm["near_high"],"거래대금배수":a["value_ratio"],"재무판정":fn["status"],"ROE(%)":fn["roe"],"매출성장(%)":fn["revenue_growth"],"Forward PER":fn["forward_pe"],"판정":f"{signal} ({final:.1f}점)","판정점수":final,"1차매수가($)":a["entry"],"2차매수가($)":a["entry2"],"평균매수가($)":avg,"3%손절가($)":round(avg*.97,2),"+15%목표($)":a["target"],"+20%목표($)":round(a["entry"]*1.20,2),"+25%목표($)":round(a["entry"]*1.25,2),"ATR(%)":a["atr_pct"]})
-            details[sym]=(d,a,lm,fn,pdeta)
-        except Exception as e:errors.append(f"{sym}: {str(e)[:300]}")
-        if progress is not None:progress.progress((i+1)/max(1,len(recs)))
+            result={"순위":0,"종목":r["name"],"티커":sym,"거래소":excd,"포착경로":r["sources"],"현재가($)":round(px,2),"USA점수":final,"주도주":lm["leader_score"],"기술":a["score"],"재무":fn["fund_score"],"20일RS(%)":lm["rs20"],"60일RS(%)":lm["rs60"],"120일고점대비(%)":lm["near_high"],"거래대금배수":a["value_ratio"],"재무판정":fn["status"],"ROE(%)":fn["roe"],"매출성장(%)":fn["revenue_growth"],"Forward PER":fn["forward_pe"],"판정":f"{signal} ({final:.1f}점)","판정점수":final,"1차매수가($)":a["entry"],"2차매수가($)":a["entry2"],"평균매수가($)":avg,"3%손절가($)":round(avg*.97,2),"+15%목표($)":a["target"],"+20%목표($)":round(a["entry"]*1.20,2),"+25%목표($)":round(a["entry"]*1.25,2),"ATR(%)":a["atr_pct"]}
+            return sym,result,(d,a,lm,fn,pdeta),None
+        except Exception as e:
+            return sym,None,None,f"{sym}: {str(e)[:300]}"
+
+    max_workers=min(6,max(1,len(recs)))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures={pool.submit(analyze_one,r):r["symbol"] for r in recs}
+        for done,future in enumerate(as_completed(futures),1):
+            sym,row,detail,error=future.result()
+            if row is not None:rows.append(row);details[sym]=detail
+            if error:errors.append(error)
+            if message is not None:message.write(f"⏳ {done}/{len(recs)} 정밀분석 · 최근완료 {sym}")
+            if progress is not None:progress.progress(done/max(1,len(recs)))
     rows.sort(key=lambda x:x["USA점수"],reverse=True)
     for n,r in enumerate(rows,1):r["순위"]=n
     st.session_state["us_precision_errors"]=errors
@@ -248,9 +261,15 @@ def analyze_candidate_frame(cand,limit=None,progress=None,message=None):
 def run_usa_unified_update(cfg,precise,status):
     status.write("⏳ ① 미국시장 데이터 준비 중...")
     if precise:
-        if not cfg["key"] or not cfg["secret"]:raise RuntimeError("정밀 전체 업데이트에는 KIS App Key/Secret이 필요합니다.")
-        api=KISUS(cfg);scan=USScanner(api);kis_cand,kis_errs=scan.candidates(40,25);broad,broad_errs=broad_us_candidates(120)
-        cand=pd.concat([broad,kis_cand],ignore_index=True).sort_values("pre_score",ascending=False).drop_duplicates("symbol").head(120).reset_index(drop=True);errs=kis_errs+broad_errs
+        broad,broad_errs=broad_us_candidates(200,full_market=True)
+        candidate_frames=[broad];kis_errs=[]
+        if cfg.get("key") and cfg.get("secret") and not str(cfg.get("key","")).startswith("__YAHOO_AUTO__"):
+            try:
+                api=KISUS(cfg);scan=USScanner(api);kis_cand,kis_errs=scan.candidates(60,35)
+                if kis_cand is not None and not kis_cand.empty:candidate_frames.append(kis_cand)
+            except Exception as e:kis_errs=[f"KIS 보강 후보: {e}"]
+        cand=pd.concat(candidate_frames,ignore_index=True).sort_values("pre_score",ascending=False).drop_duplicates("symbol").head(200).reset_index(drop=True)
+        errs=kis_errs+broad_errs
         if cand is None or cand.empty:raise RuntimeError("미국시장 후보를 가져오지 못했습니다.")
         save_json(CAND_FILE,cand.to_dict("records"));st.session_state["us_errors"]=errs
     else:
@@ -259,7 +278,7 @@ def run_usa_unified_update(cfg,precise,status):
         cand=cand.head(25)
     st.session_state["us_candidates"]=cand;status.write(f"✅ ① 시장 후보 {len(cand)}개 준비")
     status.write("⏳ ② 전체시장 후보 정밀분석 중...");bar=st.progress(0)
-    rows,details=analyze_candidate_frame(cand,limit=80 if precise else 25,progress=bar,message=status);bar.empty()
+    rows,details=analyze_candidate_frame(cand,limit=120 if precise else 30,progress=bar,message=status);bar.empty()
     if not rows:raise RuntimeError("정밀분석 정상 결과가 없습니다.")
     st.session_state["us_ranked"]=rows;st.session_state["us_details"]=details;save_json(TOP12_FILE,rows[:12]);save_kakao_watchlist(rows[:12])
     status.write(f"✅ ② 전체시장 분석 완료 · {len(rows)}개");status.write("✅ ③ USA TOP12 선정 완료");status.write("✅ ④ 부의 점프 계산 완료 · 주도주/기술/재무/거래강도 통합")
@@ -746,19 +765,24 @@ with tabs[7]:
 with tabs[0]:
     st.subheader("🔎 NASDAQ + NYSE + AMEX 전체시장 분석")
     c1,c2=st.columns(2)
-    cand_n=c1.number_input("정밀분석 후보 수",20,70,40,5)
-    per_source=c2.number_input("거래소별·랭킹별 수집 수",10,40,25,5)
-    st.info("미국은 한국의 외국인·기관 일별 수급과 구조가 달라, 수급 대신 거래대금·거래증가·신고가·시총 순위를 결합합니다.")
-    if st.button("① 미국시장 후보 생성",type="primary",use_container_width=True):
-        if not s["key"] or not s["secret"]: st.error("KIS App Key/Secret을 먼저 저장하세요.")
-        else:
-            try:
-                api=KISUS(s); scan=USScanner(api)
-                cand,errs=scan.candidates(cand_n,per_source)
-                st.session_state["us_candidates"]=cand; st.session_state["us_errors"]=errs
-                save_json(CAND_FILE,cand.to_dict("records"))
-                st.success(f"주도주 후보 {len(cand)}개 생성")
-            except Exception as e: st.error(str(e))
+    cand_n=c1.number_input("정밀분석 후보 수",40,200,120,20)
+    per_source=c2.number_input("KIS 순위별 보강 수",10,60,35,5)
+    st.info("NASDAQ·NYSE·AMEX 전체 종목을 가볍게 일괄검색한 뒤 유동성·거래증가·돌파접근 후보만 정밀분석합니다. KIS 토큰은 순위 후보를 추가 보강합니다.")
+    if st.button("① 미국 전체시장 경량검색 → 후보 생성",type="primary",use_container_width=True):
+        try:
+            broad,broad_errs=broad_us_candidates(int(cand_n),full_market=True)
+            frames=[broad];errs=list(broad_errs)
+            if s.get("key") and s.get("secret") and not str(s.get("key","")).startswith("__YAHOO_AUTO__"):
+                try:
+                    api=KISUS(s);scan=USScanner(api);kis_cand,kis_errs=scan.candidates(min(60,int(cand_n)),int(per_source))
+                    if kis_cand is not None and not kis_cand.empty:frames.append(kis_cand)
+                    errs.extend(kis_errs)
+                except Exception as e:errs.append(f"KIS 후보 보강: {e}")
+            cand=pd.concat(frames,ignore_index=True).sort_values("pre_score",ascending=False).drop_duplicates("symbol").head(int(cand_n)).reset_index(drop=True)
+            st.session_state["us_candidates"]=cand;st.session_state["us_errors"]=errs
+            save_json(CAND_FILE,cand.to_dict("records"))
+            st.success(f"미국 전체시장 경량검색 완료 · 정밀후보 {len(cand)}개")
+        except Exception as e:st.error(str(e))
     cand=st.session_state.get("us_candidates")
     if cand is None and CAND_FILE.exists():
         _saved=load_json(CAND_FILE,[])
