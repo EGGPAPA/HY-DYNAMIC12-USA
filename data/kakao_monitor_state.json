@@ -10,5 +10,6 @@
   "leader_entry:2026-08-31:AMGN": true,
   "leader_entry:2026-08-31:TMO": true,
   "leader_entry:2026-08-31:JNJ": true,
-  "holding:BKNG:stop": true
+  "holding:BKNG:stop": true,
+  "leader_entry:2026-08-31:MSFT": true
 }
