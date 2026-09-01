@@ -2,14 +2,14 @@
   "NU_entry1": false,
   "_updated_at": "2026-08-16T07:52:34.004589+00:00",
   "candidate:NU:entry1": false,
-  "leader_entry:2026-08-31:PANW": true,
-  "leader_entry:2026-08-31:INTU": true,
-  "leader_entry:2026-08-31:ABNB": true,
-  "leader_entry:2026-08-31:DIS": true,
-  "leader_entry:2026-08-31:SNOW": true,
-  "leader_entry:2026-08-31:AMGN": true,
-  "leader_entry:2026-08-31:TMO": true,
-  "leader_entry:2026-08-31:JNJ": true,
   "holding:BKNG:stop": true,
-  "leader_entry:2026-08-31:MSFT": true
+  "leader_entry:2026-09-01:INTU": true,
+  "leader_entry:2026-09-01:ABNB": true,
+  "leader_entry:2026-09-01:DASH": true,
+  "leader_entry:2026-09-01:DIS": true,
+  "leader_entry:2026-09-01:AMGN": true,
+  "leader_entry:2026-09-01:REGN": true,
+  "leader_entry:2026-09-01:JNJ": true,
+  "leader_entry:2026-09-01:ZS": true,
+  "leader_entry:2026-09-01:MDB": true
 }
