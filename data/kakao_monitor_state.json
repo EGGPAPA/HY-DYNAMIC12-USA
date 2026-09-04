@@ -3,15 +3,10 @@
   "_updated_at": "2026-08-16T07:52:34.004589+00:00",
   "candidate:NU:entry1": false,
   "holding:BKNG:stop": true,
-  "leader_entry:2026-09-03:INTU": true,
-  "leader_entry:2026-09-03:REGN": true,
-  "leader_entry:2026-09-03:AMGN": true,
-  "leader_entry:2026-09-03:TMO": true,
-  "leader_entry:2026-09-03:ABNB": true,
-  "leader_entry:2026-09-03:DIS": true,
-  "leader_entry:2026-09-03:PLTR": true,
-  "leader_entry:2026-09-03:CEG": true,
-  "leader_entry:2026-09-03:XOM": true,
-  "leader_entry:2026-09-03:ADBE": true,
-  "leader_entry:2026-09-03:VRTX": true
+  "leader_entry:2026-09-04:MRK": true,
+  "leader_entry:2026-09-04:VRTX": true,
+  "leader_entry:2026-09-04:REGN": true,
+  "leader_entry:2026-09-04:CVX": true,
+  "leader_entry:2026-09-04:F": true,
+  "leader_entry:2026-09-04:ACN": true
 }
