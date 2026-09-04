@@ -47,7 +47,10 @@ def run_backtest(names,progress=None):
     for n,(ticker,name) in enumerate(items,1):
         data=_monthly(ticker)
         if len(data)>=20:
-            close=pd.to_numeric(data["Close"],errors="coerce").dropna();volume=pd.to_numeric(data["Volume"],errors="coerce").reindex(close.index) if "Volume" in data else None;prev={t:False for t in thresholds}
+            close=pd.to_numeric(data["Close"],errors="coerce").replace([float("inf"),float("-inf")],pd.NA)
+            close=close[close.notna() & close.gt(0)]
+            volume=pd.to_numeric(data["Volume"],errors="coerce").reindex(close.index) if "Volume" in data else None
+            prev={t:False for t in thresholds}
             for i in range(6,len(close)-1):
                 result=_score(close,volume,i)
                 if not result:continue
