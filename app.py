@@ -28,6 +28,7 @@ from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from monthly_breakout_ui import render_monthly_breakout_tab, scan_monthly_breakouts
 from usa_backtest_ui import render_usa_backtest_tab
+from usa_rise_timing_ui import render_usa_rise_timing_tab
 
 STATE_DIR=Path("data")
 STATE_DIR.mkdir(exist_ok=True)
@@ -777,7 +778,7 @@ def render_usa_integrated_buy_panel(top):
     if not ma_rows:st.warning("5개월선 결과가 없습니다. 빠른 또는 정밀 전체 업데이트를 실행해야 완전한 종합평가가 가능합니다.")
 
 
-tabs=st.tabs(["🔎 전체시장 분석","🏆 USA TOP12","🚀 부의 점프","🔥 현재 5개월선 돌파","📈 과거 성과 검증","💰 자금관리","📋 전략 규칙","⚙️ KIS 설정","🔔 카카오"])
+tabs=st.tabs(["🔎 전체시장 분석","🏆 USA TOP12","🚀 부의 점프","🔥 현재 5개월선 돌파","📈 과거 성과 검증","💰 자금관리","📋 전략 규칙","⚙️ KIS 설정","🔔 카카오","📍 상승시점 관찰"])
 
 with tabs[7]:
     st.subheader("KIS 설정")
@@ -1213,3 +1214,7 @@ with tabs[3]:
 with tabs[4]:
     render_usa_backtest_tab()
 
+
+
+with tabs[9]:
+    render_usa_rise_timing_tab()
