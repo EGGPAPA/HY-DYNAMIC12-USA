@@ -3,7 +3,7 @@
   "_updated_at": "2026-08-16T07:52:34.004589+00:00",
   "candidate:NU:entry1": true,
   "holding:BKNG:stop": true,
-  "leader_entry:2026-09-15:COIN": true,
-  "leader_entry:2026-09-15:HOOD": true,
-  "leader_entry:2026-09-15:TMO": true
+  "leader_entry:2026-09-16:NOW": true,
+  "leader_entry:2026-09-16:ACN": true,
+  "candidate:NU:entry2": true
 }
